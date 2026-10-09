@@ -51,7 +51,7 @@ class Counter:
         if self.busy:
             raise ValueError("A display is moving. Wait or press Stop.")
         if not self.armed:
-            raise ValueError("Outputs are stopped. Arm outputs before moving a display.")
+            raise ValueError("Servo control is disabled. Enable servo control before moving a display.")
 
     def show(self, number):
         with self.lock:

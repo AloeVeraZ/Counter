@@ -81,7 +81,7 @@ class PCA9685:
             mode = self.bus.read_byte_data(self.address, 0x00)
             if mode & 0x10 or not mode & 0x20:
                 self.initialized = False
-                raise RuntimeError("Board reset detected; restart Counter before arming.")
+                raise RuntimeError("Board reset detected; restart Counter before enabling servo control.")
             return {"connected": True, "message": "PCA9685 · 0x40 · I²C1 · 50 Hz"}
         except Exception as error:
             self.error = str(error)

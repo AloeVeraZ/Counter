@@ -1,7 +1,9 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
-let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', channelSignature = '', requestPending = 0;
+let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', channelSignature = '', requestPending = 0, pollTimer = null;
+function schedulePoll(delay) { clearTimeout(pollTimer); pollTimer = setTimeout(tick,delay); }
+function pollDelay() { if (document.hidden && !state?.armed) return 15000; return state?.busy || auto ? 500 : state?.armed ? 1000 : 3000; }
 function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = !message; $('notice').classList.toggle('error', error); }
 function setAuto(value) { auto = value; nextCount = value ? Date.now() + Number($('interval').value) : null; $('auto').textContent = value ? 'Pause counting' : 'Start counting'; }
 async function api(path, data) {
@@ -13,7 +15,7 @@ async function api(path, data) {
 }
 async function command(path, data, message = '') {
   requestPending++;
-  try { const result = await api(path, data); if (result.config) render(result); notice(message || result.message || ''); return result; }
+  try { const result = await api(path, data); if (result.config) { render(result); if (!ticking) schedulePoll(150); } notice(message || result.message || ''); return result; }
   catch (error) { setAuto(false); notice(error.message, true); throw error; }
   finally { requestPending--; }
 }
@@ -52,11 +54,18 @@ function render(value) {
   $('connection').textContent = value.simulated ? 'Simulation' : value.board.connected ? 'Board connected' : 'Board offline';
   $('connection').className = `status ${value.board.connected ? 'good' : 'bad'}`;
   $('mode').textContent = value.simulated ? 'SIMULATION · NO HARDWARE' : 'PCA9685 · 16 channels';
-  $('movement').textContent = value.busy ? `Moving CH ${value.moving_channel ?? '…'}` : value.armed ? 'Outputs armed' : 'Outputs stopped';
+  const controlName = value.simulated ? 'Preview controls' : 'Servo control';
+  $('movement').textContent = value.busy ? `Moving CH ${value.moving_channel ?? '…'}` : `${controlName} ${value.armed ? 'enabled' : 'disabled'}`;
   $('movement').className = `status ${value.armed ? 'good' : ''}`;
-  $('armed-label').textContent = value.armed ? 'ARMED' : 'STOPPED';
-  $('arm').textContent = value.armed ? 'Outputs armed' : 'Arm outputs';
-  $('cal-arm').textContent = value.armed ? 'Outputs armed' : 'Arm outputs';
+  $('armed-label').textContent = value.armed ? 'ENABLED' : 'DISABLED';
+  const enableLabel = value.armed ? `${controlName} enabled` : `Enable ${controlName.toLowerCase()}`;
+  $('arm').textContent = $('cal-arm').textContent = enableLabel;
+  // Also updates an already-running preview whose template was loaded before this release.
+  const controlPanel = $('arm').closest('.panel');
+  controlPanel.querySelector('h2').textContent = controlName;
+  controlPanel.querySelector('p.help').textContent = value.simulated
+    ? 'Enable to try the display and calibration controls on this PC. This preview sends no commands to real servos.'
+    : 'Enable to allow servo movement commands. Enabling does not move a servo; choose a number or test a position to move it. Stop outputs disables control again.';
   $('arm').disabled = $('cal-arm').disabled = value.armed || value.busy || !value.board.connected;
   $('show-number').disabled = !value.armed || value.busy;
   document.querySelectorAll('[data-step]').forEach(button => {button.disabled = !value.armed || value.busy;});
@@ -119,7 +128,7 @@ $('open-calibration').addEventListener('click',()=>view('calibration'));
 $('cal-channel').addEventListener('change',()=>calibrationRows(true));
 $('arm').addEventListener('click',run(()=>command('/api/arm',{})));
 $('cal-arm').addEventListener('click',run(()=>command('/api/arm',{})));
-$('stop').addEventListener('click',run(()=>{setAuto(false);return command('/api/stop',{},'Outputs stopped. Arm again to move a display.');}));
+$('stop').addEventListener('click',run(()=>{setAuto(false);return command('/api/stop',{},'Control disabled. Enable it again when you are ready to move a display.');}));
 $('number-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/number',{number:$('number').value.trim()}))();});
 document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/step',{delta:Number(button.dataset.step)});$('number').value=result.number;})));
 $('zero').addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/number',{number:'0'});$('number').value=result.number;}));
@@ -134,7 +143,7 @@ $('check-updates').addEventListener('click',run(()=>checkUpdates(true)));
 $('update').addEventListener('click',run(async()=>{setAuto(false);$('update').disabled=true;await command('/api/updates',{});}));
 $('theme').addEventListener('click',()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;$('theme').setAttribute('aria-label',`Toggle ${theme==='dark'?'light':'dark'} theme`);try{localStorage.setItem('counter-theme',theme);}catch{}});
 try{if(localStorage.getItem('counter-theme')==='light')document.documentElement.dataset.theme='light';}catch{}
-document.addEventListener('visibilitychange',()=>{if(document.hidden)setAuto(false);});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)setAuto(false);if(!ticking)schedulePoll(document.hidden?pollDelay():0);});
 document.addEventListener('keydown',event=>{if(event.key==='Escape')$('stop').click();});
 async function tick(){
   if(ticking)return;ticking=true;
@@ -146,6 +155,6 @@ async function tick(){
       else if(Date.now()>=nextCount){nextCount=null;const response=await command('/api/step',{delta:1});$('number').value=response.number;}
     }
   }catch(error){setAuto(false);$('connection').textContent='Disconnected';$('connection').className='status bad';$('arm').disabled=$('cal-arm').disabled=$('show-number').disabled=true;notice(error.message||'Cannot reach Counter. Counting is paused.',true);}
-  finally{ticking=false;setTimeout(tick,800);}
+  finally{ticking=false;schedulePoll(pollDelay());}
 }
 tick();

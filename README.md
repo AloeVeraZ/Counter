@@ -89,13 +89,17 @@ power disconnect where needed.
 ## Calibrate your digit mechanism
 
 1. In **Display → Your setup**, choose the number of modules (1–16). Save.
-2. In **Calibration**, select a display and arm outputs.
+2. In **Calibration**, select a display and choose **Enable servo control**
+   (**Enable preview controls** in PC simulation).
 3. Gently test/adjust a pulse to align a digit in the window. Enter that pulse
    in its matching 0–9 row. Repeat for each digit, then save.
 4. Repeat for each display. Blank rows remain uncalibrated. Suggested input
    placeholders are **not saved calibration**, and the app refuses to show a
    digit with no saved position.
-5. Arm outputs and enter a number. Leading zeros fill unused places.
+5. Enable servo control and enter a number. Leading zeros fill unused places.
+
+Enabling control allows movement commands; it does not itself move a servo.
+**Stop outputs** disables control again. Nothing enables itself on startup.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 The accepted envelope is 600–2400 µs; that is a software limit, **not a statement
@@ -111,13 +115,27 @@ directly reach a full 360° wheel. A continuous-rotation servo controls speed an
 direction, not absolute position; it needs feedback and a different controller.
 The supplied CAD screenshot alone does not establish the required travel.
 
+The goBILDA standard-size category includes several different servo families.
+Its regular 2000 Series Dual Mode servos have 300° of position-controlled
+travel; the 5-Turn versions have 1800°. Continuous-rotation mode uses PWM to
+command speed/direction, not a digit position. Confirm the exact SKU and mode
+before choosing pulse limits, travel or settling time. Counter's manual
+calibration does not program a servo's operating mode. Sources:
+[regular Dual Mode specifications](https://www.gobilda.com/2000-series-dual-mode-servo-25-4-super-speed/),
+[5-Turn specifications](https://www.gobilda.com/2000-series-5-turn-dual-mode-servo-25-2-torque/).
+
 The +/− buttons count without wrapping at the maximum. Up to sixteen decimal
 digits are kept as strings; no JavaScript floating-point rounding occurs.
 Auto count runs while this dashboard is open and visible, waiting for each
 move to complete. It pauses on Stop, errors, tab hiding, or range overflow.
 The hardware worker always moves sequentially and Stop interrupts its wait.
 Changing calibration/setup stops outputs. An interrupted move is marked unknown
-and is sent again when requested after rearming.
+and is sent again when requested after enabling control again. To reduce idle
+traffic, the dashboard polls every three seconds with control disabled, every
+second with control enabled, and every half second during movement/counting.
+A hidden, disabled dashboard polls every fifteen seconds; foregrounding it
+refreshes immediately. Stop commands are sent immediately, independently of
+the polling interval.
 
 ## Updates
 
