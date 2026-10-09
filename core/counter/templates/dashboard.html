@@ -96,6 +96,18 @@
       </div>
     </section></div>
   </section>
+  <div id="update-overlay" class="update-overlay" role="dialog" aria-modal="true" aria-labelledby="update-title" hidden>
+    <section class="panel update-card">
+      <div class="panel-head"><h2 id="update-title">Updating Counter</h2><span id="update-percent" class="pill">0%</span></div>
+      <div class="panel-body">
+        <p class="update-stage" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span id="update-stage">Starting the update…</span></p>
+        <div class="meter"><div id="update-progress"></div></div>
+        <p id="update-help" class="help">Outputs are stopped. Keep this page open; it reloads by itself when the new version is running.</p>
+        <pre id="update-overlay-log" class="update-log" aria-label="Installation log" hidden></pre>
+        <button id="update-close" class="wide" hidden>Close</button>
+      </div>
+    </section>
+  </div>
   <footer><span>COUNTER <span class="subtle">/ Servo-driven decimal displays</span></span><span class="subtle">1 board · Up to 16 displays</span></footer>
 </main>
 </body>

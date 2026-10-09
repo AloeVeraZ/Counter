@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
-let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', channelSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false;
+let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', channelSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null;
 function schedulePoll(delay) { clearTimeout(pollTimer); pollTimer = setTimeout(tick,delay); }
 function pollDelay() { if (document.hidden && !state?.armed) return 15000; return state?.busy || auto ? 500 : state?.armed ? 1000 : 3000; }
 function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = !message; $('notice').classList.toggle('error', error); }
@@ -171,18 +171,77 @@ async function checkUpdates(refresh=false){
   updateState=await api(`/api/updates${refresh?'?refresh=1':''}`);
   if(!updateChannelChosen)$('update-branch').value=updateState.branch||'main';
   renderUpdates();
-  if(updateState.checking||updateState.job?.state==='running')setTimeout(()=>checkUpdates().catch(error=>notice(error.message,true)),1500);
+  if(updateState.job?.state==='running')watchUpdate(updateState.job.installed_commit||state?.installed_commit||'');
+  else if(updateState.checking)setTimeout(()=>checkUpdates().catch(error=>notice(error.message,true)),1500);
 }
+async function updateJob(){
+  const response=await fetch('/api/updates/job',{cache:'no-store'});
+  if(response.status===401){window.location.assign('/login');throw new Error('Enter your Pi password to continue.');}
+  if(!response.ok)throw new Error(`Update status unavailable (${response.status}).`);
+  return response.json();
+}
+function renderUpdateOverlay(mode,stage,progress,log){
+  $('update-overlay').classList.toggle('failed',mode==='failed');
+  $('update-overlay').classList.toggle('done',mode==='done');
+  $('update-title').textContent=mode==='failed'?'Update failed':mode==='done'?'Counter updated':'Updating Counter';
+  $('update-stage').textContent=stage;
+  if(progress!==null){$('update-progress').style.width=`${progress}%`;$('update-percent').textContent=`${progress}%`;}
+  if(log!==null){$('update-overlay-log').textContent=log.join('\n');$('update-overlay-log').hidden=!log.length;$('update-overlay-log').scrollTop=$('update-overlay-log').scrollHeight;}
+}
+// Keep watching through the service restart, then reload into the new release.
+function watchUpdate(fromCommit){
+  if(updateWatch)return;
+  updateWatch={from:fromCommit,started:Date.now(),timer:null};
+  setAuto(false);clearTimeout(pollTimer);notice('');
+  $('update-close').hidden=true;
+  $('update-help').textContent='Outputs are stopped. Keep this page open; it reloads by itself when the new version is running.';
+  renderUpdateOverlay('running','Starting the update…',0,[]);
+  $('update-overlay').hidden=false;
+  pollUpdate();
+}
+async function pollUpdate(){
+  const watch=updateWatch;if(!watch)return;
+  let job=null;
+  try{job=await updateJob();}catch{}
+  if(updateWatch!==watch)return;
+  if(!job){
+    renderUpdateOverlay('running','Restarting Counter…',null,null);
+  }else{
+    if(!watch.from)watch.from=job.installed_commit||'';
+    const restarted=job.instance!==token.slice(0,12)||Boolean(watch.from&&job.installed_commit&&job.installed_commit!==watch.from);
+    const stage=job.stage?job.stage[0].toUpperCase()+job.stage.slice(1):'Starting the update';
+    if(job.state==='finished'){
+      if(restarted){renderUpdateOverlay('done','New version is running. Reloading…',100,job.log);setTimeout(()=>window.location.reload(),1200);return;}
+      closeUpdateWatch();notice('The update finished; Counter is already running this version.');return;
+    }
+    if(job.state==='failed'){
+      renderUpdateOverlay('failed',`Failed while ${job.stage||'installing'}.`,null,job.log);
+      $('update-help').textContent='Counter kept or restored the previous release. The log below shows what went wrong.';
+      $('update-close').textContent=restarted?'Reload dashboard':'Close';
+      $('update-close').dataset.reload=restarted?'1':'';
+      $('update-close').hidden=false;return;
+    }
+    renderUpdateOverlay('running',`${stage}…`,job.progress??null,job.log);
+  }
+  if(Date.now()-watch.started>30*60*1000)$('update-help').textContent='This is taking longer than usual. Check journalctl -u counter-update on the Pi.';
+  watch.timer=setTimeout(pollUpdate,2000);
+}
+function closeUpdateWatch(){
+  if(updateWatch)clearTimeout(updateWatch.timer);
+  updateWatch=null;$('update-overlay').hidden=true;schedulePoll(0);
+  if(!document.querySelector('[data-page="system"]').hidden)checkUpdates().catch(error=>notice(error.message,true));
+}
+$('update-close').addEventListener('click',()=>{if($('update-close').dataset.reload)window.location.reload();else closeUpdateWatch();});
 $('update-branch').addEventListener('change',()=>{updateChannelChosen=true;$('testing-ack').checked=false;renderUpdates();});
 $('testing-ack').addEventListener('change',renderUpdates);
 $('check-updates').addEventListener('click',run(()=>checkUpdates(true)));
-$('update').addEventListener('click',run(async()=>{setAuto(false);$('update').disabled=true;try{await command('/api/updates',{branch:$('update-branch').value,acknowledge_testing:$('testing-ack').checked});setTimeout(()=>checkUpdates().catch(error=>notice(error.message,true)),1000);}catch(error){renderUpdates();throw error;}}));
+$('update').addEventListener('click',run(async()=>{setAuto(false);$('update').disabled=true;const from=state?.installed_commit||'';try{await command('/api/updates',{branch:$('update-branch').value,acknowledge_testing:$('testing-ack').checked});watchUpdate(from);}catch(error){renderUpdates();throw error;}}));
 $('theme').addEventListener('click',()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;$('theme').setAttribute('aria-label',`Toggle ${theme==='dark'?'light':'dark'} theme`);try{localStorage.setItem('counter-theme',theme);}catch{}});
 try{if(localStorage.getItem('counter-theme')==='light')document.documentElement.dataset.theme='light';}catch{}
 document.addEventListener('visibilitychange',()=>{if(document.hidden)setAuto(false);if(!ticking)schedulePoll(document.hidden?pollDelay():0);});
-document.addEventListener('keydown',event=>{if(event.key==='Escape')$('stop').click();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!updateWatch)$('stop').click();});
 async function tick(){
-  if(ticking)return;ticking=true;
+  if(ticking||updateWatch)return;ticking=true;
   try{
     const result=await api('/api/state');render(result);
     if(auto&&!requestPending){
@@ -194,3 +253,5 @@ async function tick(){
   finally{ticking=false;schedulePoll(pollDelay());}
 }
 tick();
+// Resume the progress screen if an update is already running (reload or another device).
+updateJob().then(job=>{if(job.state==='running')watchUpdate(job.installed_commit||'');}).catch(()=>{});

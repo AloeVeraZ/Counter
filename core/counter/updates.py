@@ -10,13 +10,24 @@ REPOSITORY = "https://github.com/AloeVeraZ/Counter.git"
 HELPER = Path("/usr/local/sbin/counter-update")
 BRANCHES = ("main", "testing")
 UPDATE_LOG = Path("/var/log/counter-update.log")
+# The "==> stage" lines that update.sh and install.sh log, in order.
+STAGES = ("downloading Counter", "checking the Pi", "installing Raspberry Pi OS dependencies",
+          "enabling I²C and GPIO access", "building the Counter release",
+          "checking the service account can run the release", "configuring the Counter service",
+          "starting Counter")
 
 
 def update_job():
     try:
-        lines = UPDATE_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
+        everything = UPDATE_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
-        return {"state": "idle", "log": []}
+        return {"state": "idle", "log": [], "stage": "", "progress": 0}
+    lines = everything[-20:]
+    stage, progress = "", 0
+    for line in everything:
+        if line.startswith("==> "):
+            stage = line[4:].strip()
+            progress = next((index + 1 for index, name in enumerate(STAGES) if stage.startswith(name)), progress)
     if lines and lines[-1].startswith("Counter update completed."):
         state = "finished"
     elif lines and lines[-1].startswith("Counter update failed"):
@@ -28,7 +39,9 @@ def update_job():
             state = "running" if active in {"active", "activating"} else "failed"
         except (OSError, subprocess.SubprocessError):
             state = "failed"
-    return {"state": state, "log": lines}
+    # 100% is reserved for a finished update, not for entering the last stage.
+    percent = 100 if state == "finished" else round(100 * progress / (len(STAGES) + 1))
+    return {"state": state, "log": lines, "stage": stage, "progress": percent}
 
 
 class Updates:

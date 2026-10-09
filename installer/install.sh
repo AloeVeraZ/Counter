@@ -20,7 +20,9 @@ source_dir=$(cd -- "$source_dir" && pwd)
 if (( EUID != 0 )); then
   exec sudo bash "$source_dir/installer/install.sh" --source "$source_dir" --branch "$install_ref" --user "${install_user:-$(id -un)}"
 fi
-step='checking the Pi'
+# Each stage is logged so the dashboard can show installation progress.
+begin() { step=$1; printf '==> %s\n' "$1"; }
+begin 'checking the Pi'
 trap 'status=$?; printf "Counter install failed while %s (line %s).\n" "$step" "$LINENO" >&2; exit "$status"' ERR
 [[ $install_user =~ ^[a-z_][a-z0-9_-]*[$]?$ && $install_user != root ]] || { echo 'Use --user with a non-root Pi username.' >&2; exit 2; }
 id "$install_user" >/dev/null
@@ -30,29 +32,29 @@ exec 9>/run/counter-install.lock
 flock -n 9 || { echo 'Another Counter install is running.' >&2; exit 1; }
 commit=$(git -c safe.directory="$source_dir" -C "$source_dir" rev-parse HEAD)
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || exit 1
-step='installing Raspberry Pi OS dependencies'
+begin 'installing Raspberry Pi OS dependencies'
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=60 update
 # Use the OS's lgpio binary built for /usr/bin/python3, including Python 3.13.
 apt-get -o DPkg::Lock::Timeout=60 install -y python3 python3-venv python3-lgpio libpam0g libpam-modules libpam-runtime git curl ca-certificates i2c-tools
 /usr/bin/python3 -c 'import sys; assert sys.version_info >= (3, 11), "Counter requires Python 3.11 or newer"; import lgpio; from importlib.metadata import version; print("OS lgpio:", version("lgpio"))'
-step='enabling I²C and GPIO access'
+begin 'enabling I²C and GPIO access'
 raspi-config nonint do_i2c 0
 usermod -a -G i2c,gpio "$install_user"
 install -d -m 755 /opt/counter/releases /usr/local/lib/counter
 release=$(mktemp -d "/opt/counter/releases/${commit:0:7}-XXXXXX")
 # mktemp creates 0700 directories; the service user must be able to enter the release.
 chmod 755 "$release"
-step='building the Counter release'
+begin 'building the Counter release'
 git -c safe.directory="$source_dir" -C "$source_dir" archive HEAD | tar -x -C "$release"
 printf '%s\n' "$commit" > "$release/INSTALL_COMMIT"
 printf '%s\n' "$install_ref" > "$release/INSTALL_REF"
 /usr/bin/python3 -m venv --system-site-packages "$release/.venv"
 "$release/.venv/bin/python" -m pip install "$release[pi]"
 PYTHONPATH="$release/core" "$release/.venv/bin/python" -m unittest discover -s "$release/tests" -v
-step="checking that $install_user can run the release"
+begin 'checking the service account can run the release'
 runuser -u "$install_user" -- test -x "$release/.venv/bin/counter"
-step='configuring the Counter service'
+begin 'configuring the Counter service'
 install -d -m 750 -o "$install_user" -g "$(id -gn "$install_user")" /var/lib/counter
 # Save the chosen account inside a root-owned helper, not in dashboard input.
 sed "s/@INSTALL_USER@/$install_user/g" "$release/installer/update.sh" > /usr/local/sbin/counter-update
@@ -97,7 +99,7 @@ ReadWritePaths=/var/lib/counter
 [Install]
 WantedBy=multi-user.target
 UNIT
-step='starting Counter'
+begin 'starting Counter'
 previous=''
 if [[ -d /opt/counter/current ]]; then
   previous=$(readlink -f /opt/counter/current)

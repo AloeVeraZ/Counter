@@ -4,7 +4,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
-from counter.updates import Updates, REPOSITORY, update_job
+from counter.updates import Updates, REPOSITORY, STAGES, update_job
 
 
 class UpdateTests(unittest.TestCase):
@@ -115,3 +115,25 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(update_job()['state'],'finished')
             log.write_text('Counter update failed (exit 1).\n')
             self.assertEqual(update_job()['state'],'failed')
+
+    def test_update_job_reports_the_latest_stage_even_after_long_output(self):
+        log = self.root/'update.log'
+        noise = ''.join(f'apt line {n}\n' for n in range(100))
+        log.write_text('==> downloading Counter / testing\n==> checking the Pi\n==> building the Counter release\n'+noise)
+        with patch('counter.updates.UPDATE_LOG',log), patch('counter.updates.subprocess.run',return_value=SimpleNamespace(stdout='active\n')):
+            job = update_job()
+        self.assertEqual(job['stage'],'building the Counter release')
+        self.assertEqual(job['progress'],round(100*(STAGES.index('building the Counter release')+1)/(len(STAGES)+1)))
+        log.write_text(f'==> {STAGES[-1]}\n')
+        with patch('counter.updates.UPDATE_LOG',log), patch('counter.updates.subprocess.run',return_value=SimpleNamespace(stdout='active\n')):
+            self.assertLess(update_job()['progress'],100)
+        log.write_text(f'==> {STAGES[-1]}\nCounter update completed.\n')
+        with patch('counter.updates.UPDATE_LOG',log):
+            self.assertEqual(update_job()['progress'],100)
+        self.assertEqual(len(job['log']),20)
+
+    def test_every_stage_is_logged_by_the_installer_scripts(self):
+        scripts = (Path(__file__).parents[1]/'installer/install.sh').read_text(encoding='utf-8') + \
+                  (Path(__file__).parents[1]/'installer/update.sh').read_text(encoding='utf-8')
+        for stage in STAGES:
+            self.assertTrue(f"begin '{stage}" in scripts or f'echo "==> {stage}' in scripts, stage)

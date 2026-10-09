@@ -103,7 +103,7 @@ class ServiceUnitTests(unittest.TestCase):
 class InstallReleasePermissionTests(unittest.TestCase):
     def test_release_directory_is_enterable_by_the_service_user(self):
         source = (Path(__file__).parents[1] / "installer/install.sh").read_text(encoding="utf-8")
-        creation = source[source.index("release=$(mktemp"):source.index("step='building the Counter release'")]
+        creation = source[source.index("release=$(mktemp"):source.index("begin 'building the Counter release'")]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "releases").mkdir()

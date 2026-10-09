@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.exceptions import HTTPException
 from . import __version__
-from .updates import Updates
+from .updates import Updates, update_job
 from .auth import LoginThrottle
 
 
@@ -175,6 +175,12 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
     @app.get("/api/updates")
     def updates_state():
         return jsonify(updater.snapshot(refresh=request.args.get("refresh") == "1"))
+
+    @app.get("/api/updates/job")
+    def update_progress():
+        # Lets the dashboard notice when the restarted service is a different instance.
+        return jsonify({**update_job(), "instance": token[:12],
+                        "installed_commit": getattr(updater, "installed", "")})
 
     @app.post("/api/updates")
     def update_now():

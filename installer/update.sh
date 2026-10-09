@@ -26,6 +26,7 @@ fi
 branch=$2
 trap 'status=$?; if (( status == 0 )); then echo "Counter update completed."; else echo "Counter update failed (exit $status)."; fi' EXIT
 work=$(mktemp -d /var/tmp/counter-update-XXXXXX)
+echo "==> downloading Counter / $branch"
 export GIT_TERMINAL_PROMPT=0
 git clone --depth 1 --branch "$branch" https://github.com/AloeVeraZ/Counter.git "$work/source"
 [[ -f $work/source/installer/install.sh ]] || { echo "The $branch branch does not contain the new installer yet. Use testing until it is merged into main." >&2; exit 1; }

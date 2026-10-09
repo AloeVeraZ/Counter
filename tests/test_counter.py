@@ -395,6 +395,21 @@ class WebTests(unittest.TestCase):
             self.assertEqual(run.call_args.args[0][-1],'main')
 
 
+class UpdateProgressWebTests(unittest.TestCase):
+    def test_job_progress_identifies_this_service_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            counter=Counter(ConfigStore(Path(directory)/'config.json'),SimulatedBoard())
+            self.addCleanup(counter.close)
+            client=create_app(counter,FakeUpdates()).test_client()
+            import re
+            token=re.search(r'name="counter-token" content="([^"]+)"',client.get('/').get_data(as_text=True))[1]
+            with patch('counter.updates.UPDATE_LOG',Path(directory)/'update.log'):
+                job=client.get('/api/updates/job').get_json()
+        # The dashboard reloads once a restarted service answers with another instance.
+        self.assertEqual(job['instance'],token[:12])
+        self.assertEqual(job['state'],'idle')
+
+
 class EntryPointTests(unittest.TestCase):
     def serve_with(self,*args):
         from counter import __main__ as entry
