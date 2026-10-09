@@ -1,5 +1,7 @@
 # Counter development
 
+- Push development changes to `testing` for the repository owner's review. Do not push directly to or merge into `main`; the owner reviews and merges approved changes.
+- Keep Counter self-contained. Describe its own behavior without references to the owner's other projects. Preserve required third-party license notices and technical sources.
 - This project controls one PCA9685, up to 16 decimal digit modules, and no DC motors.
 - Keep the control wiring: physical Pi pins 1 VCC, 3 SDA, 5 SCL, 7 OE / BCM4, 9 GND.
 - Hardware mode must never silently fall back to simulation.

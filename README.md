@@ -5,8 +5,8 @@ has one position-controlled servo that reveals a digit from 0–9. One PCA9685
 board provides all sixteen channels. No DC motor, camera, Arduino, or drive
 logic is included.
 
-The dashboard follows MotionModule's dark panels, steel-blue controls, and
-self-hosted Barlow Condensed / Inter typography. The display preview resembles
+The dashboard uses dark panels, steel-blue controls, and self-hosted
+Barlow Condensed / Inter typography. The display preview resembles
 the individual windowed digit modules. It works offline after installation.
 
 ## Use it on your PC
@@ -34,12 +34,20 @@ cd Counter
 bash install.sh
 ```
 
-The installer enables I²C, installs a `counter` service, and serves the UI on
-**http://YOUR-PI-HOSTNAME.local:8080** (or the Pi's IP address). It does not change
-the hostname or Wi-Fi, install a hotspot, or modify MotionModule's files. If
-MotionModule is installed on this same Pi, stop its runtime before running
-Counter: **two programs must never control this PCA9685 / OE pin together**.
-Reboot once if I²C was previously disabled. The installer is shipped and tested
+The installer enables I²C, installs a `counter` service, and **reboots the Pi
+after the first successful install**. Wait for it to come back online, then open
+**http://PI-IP:8080** (or **http://YOUR-PI-HOSTNAME.local:8080**) and enter the
+current password of the Pi account that ran `bash install.sh`. There is no
+username field or separate Counter password. Login uses this Pi's local PAM
+password check, so different Pis use their own passwords and password changes
+apply on the next login. Login does not enable servo outputs.
+
+Subsequent installs and dashboard updates restart Counter without rebooting the
+Pi. Counter uses its own service, release directory, and calibration file.
+The installer keeps the Pi's existing hostname and network connection.
+Stop any other controller using the same hardware before running Counter:
+**two programs must never control this PCA9685 / OE pin together**.
+The first reboot activates I²C if it was previously disabled. The installer is shipped and tested
 for syntax, but has not been executed on a physical Pi in this development run.
 
 Counter's releases live in `/opt/counter/releases`; calibration lives in
@@ -51,9 +59,25 @@ sudo systemctl status counter
 journalctl -u counter -n 60
 ```
 
+If an older installer fails building `lgpio` (particularly on Python 3.13),
+install its native build dependencies and retry from your Counter checkout:
+
+```bash
+sudo apt update
+sudo apt install -y python3-dev swig liblgpio-dev build-essential
+bash install.sh
+```
+
+The installer now includes these dependencies, following the
+[GPIO Zero installation instructions](https://gpiozero.readthedocs.io/en/latest/installing.html#pip).
+
 ## Wire the board
 
-This keeps the PCA9685 control wiring from MotionModule:
+This shows every connection for the requested Pi-powered prototype. Physical
+header pin numbers are different from BCM GPIO numbers. The SVG is a connection
+map, not the physical order of pins on a particular breakout board.
+
+![Complete Pi, PCA9685 and servo wiring](core/counter/static/wiring.svg)
 
 | Pi physical pin | PCA9685 |
 | --- | --- |
@@ -62,20 +86,46 @@ This keeps the PCA9685 control wiring from MotionModule:
 | 5 · GPIO3 | SCL |
 | 7 · GPIO4 | OE (active-low output enable) |
 | 9 · GND | GND |
+| 2 · 5 V | V+ (servo power rail; prototype only, power budget unverified) |
+
+Keep **VCC at 3.3 V** and **V+ at the servo's rated supply voltage (5 V for this
+prototype)**. They are separate rails. The six Pi-to-board jumper wires above
+include the 5 V wire; the OE pull-up resistor is an additional connection from
+OE to VCC / Pi pin 1. Do not tie OE to ground: Counter controls it through pin 7.
 
 The software expects **I²C1, address 0x40, and 50 Hz**. Add an approximately
-10 kΩ pull-up from OE to **3.3 V**, so outputs stay disabled before the service
-starts. Connect digit modules left to right to channels **0, 1, …, count−1**.
+1 kΩ pull-up from OE to **3.3 V**, so outputs stay disabled before the service
+starts. A 10 kΩ pull-up is too weak against the 10 kΩ pull-down found on the
+Adafruit breakout; use the stronger pull-up and verify OE is high during boot
+on your board. See [Adafruit's OE pull-up guidance](https://forums.adafruit.com/viewtopic.php?t=218997).
+Connect digit modules left to right to channels **0, 1, …, count−1**.
 For example, `42` on two modules sends digit 4 to channel 0 and digit 2 to
 channel 1. Unconfigured channels receive no position commands.
 
+Every servo needs all three wires on its own PCA9685 channel:
+
+| Wire on each servo | PCA9685 channel connection |
+| --- | --- |
+| Signal (usually yellow, orange or white) | PWM / signal on that channel |
+| Power (usually red) | V+ / positive on that channel |
+| Ground (usually brown or black) | GND / negative on that channel |
+
+Repeat these three connections for **each** module, up to CH 15. Check the
+connector labels on your board and servo rather than relying only on colours.
+All channels share V+ and ground, while each has its own PWM signal.
+
 ### Servo power
 
-USB-C powers the Pi; VCC powers only the board's logic. The PCA9685 does not
+USB-C powers the Pi; VCC powers only the board's logic. The diagram's Pi pin 2
+to V+ wire documents the requested prototype, **not a validated power design**.
+The PCA9685 does not
 generate power for servos. Use a **separate regulated servo V+ supply** at the
 voltage required by your servo model, sized for the servos' current (including
-stall current), and connect its ground to the board/Pi ground. Do not connect
-servo V+ to the Pi's 3.3 V or 5 V header pins. Adafruit explicitly advises
+stall current), and connect its ground to the board/Pi ground. For that external
+supply arrangement, **remove the Pi pin 2 → V+ wire**, connect supply positive
+to V+ (or the terminal block +), and supply negative to GND (or the terminal
+block −). Never join an external supply's positive rail to the Pi's 5 V rail.
+Never power servo V+ from the Pi's 3.3 V rail. Adafruit explicitly advises
 against powering servos from the Pi's 5 V rail because it can brown out the Pi:
 [PCA9685 power guidance](https://learn.adafruit.com/16-channel-pwm-servo-driver?view=all).
 
@@ -176,12 +226,40 @@ restricted to people you trust to install code on the Pi.
 journalctl -u counter-update -n 100
 ```
 
-Use the dashboard on a **trusted local network**. It has no account login;
-anyone who can reach the Pi can operate it. Same-origin command tokens prevent
-drive-by commands from unrelated webpages, not access by another LAN user.
-Do not forward port 8080 to the public internet.
+The installed dashboard and all control/calibration/update APIs require a Pi
+password login. Login attempts are limited to five per minute across
+clients. Sessions expire after eight hours; **Sign out** stops outputs and
+clears the browser session. Counter never stores the Pi password. The session
+signing key lives beside calibration, outside installed releases. An account
+with no usable password cannot log in; set one on the Pi with `passwd`.
+
+Use the dashboard on a **trusted local network**. The default HTTP connection
+does not encrypt the Pi password in transit; password login does not add HTTPS.
+Do not forward port 8080 to the
+public internet. PC simulation (`--simulate`) remains accessible without a Pi
+password. The public `/health` endpoint exposes only the installed commit for
+installer readiness checks.
 
 ## Development checks
+
+Development changes are pushed to **`testing`** for the repository owner's
+review. The owner merges approved changes into **`main`**, which is the release
+branch used by the dashboard updater. Do not push development changes directly
+to `main`.
+
+To try the review build on a Pi:
+
+```bash
+git clone --branch testing https://github.com/AloeVeraZ/Counter.git
+cd Counter
+bash install.sh
+```
+
+For an existing testing checkout, use `git pull --ff-only origin testing` and
+run `bash install.sh` again. The dashboard's **Update now** installs `main`, so
+use the checkout's installer when testing unmerged changes.
+
+Run checks before pushing to `testing`:
 
 ```bash
 python -m unittest discover -s tests -v

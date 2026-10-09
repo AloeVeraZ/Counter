@@ -9,6 +9,7 @@ function setAuto(value) { auto = value; nextCount = value ? Date.now() + Number(
 async function api(path, data) {
   const options = data === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json', 'X-Counter-Token':token}, body:JSON.stringify(data)};
   const response = await fetch(path, options);
+  if (response.status === 401) { setAuto(false); window.location.assign('/login'); throw new Error('Enter your Pi password to continue.'); }
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
   return payload;
@@ -135,6 +136,7 @@ $('cal-channel').addEventListener('change',()=>calibrationRows(true));
 $('arm').addEventListener('click',run(()=>command('/api/arm',{})));
 $('cal-arm').addEventListener('click',run(()=>command('/api/arm',{})));
 $('stop').addEventListener('click',run(()=>{setAuto(false);return command('/api/stop',{},'Control disabled. Enable it again when you are ready to move a display.');}));
+if ($('logout')) $('logout').addEventListener('click',run(async()=>{setAuto(false);await command('/api/logout',{});window.location.assign('/login');}));
 $('number-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/number',{number:$('number').value.trim()}))();});
 document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/step',{delta:Number(button.dataset.step)});$('number').value=result.number;})));
 $('zero').addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/number',{number:'0'});$('number').value=result.number;}));

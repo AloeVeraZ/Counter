@@ -13,7 +13,7 @@
 <header class="topbar">
   <a class="brand" href="/" aria-label="Counter home"><span class="brand-mark" aria-hidden="true">C<span>_</span></span> COUNTER <small>v{{ version }}</small></a>
   <nav aria-label="Workspace"><button class="tab active" data-view="display" aria-current="page">Display</button><button class="tab" data-view="calibration">Calibration</button><button class="tab" data-view="system">System</button></nav>
-  <div class="tools"><span id="connection" class="status">Connecting</span><button id="theme" class="theme" aria-label="Toggle light theme">◐</button><button class="danger" id="stop">Stop outputs</button></div>
+  <div class="tools"><span id="connection" class="status">Connecting</span><button id="theme" class="theme" aria-label="Toggle light theme">◐</button>{% if login_required %}<button id="logout">Sign out</button>{% endif %}<button class="danger" id="stop">Stop outputs</button></div>
 </header>
 <main>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
@@ -37,7 +37,41 @@
   </section>
   <section data-page="system" hidden>
     <div class="hero"><div><p class="eyebrow">BOARD / WIRING / SOFTWARE</p><h1>Behind the display.</h1><p>A Raspberry Pi and one PCA9685. Everything you need to keep Counter running.</p></div></div>
-    <div class="system-grid"><section class="panel"><div class="panel-head"><h2>Servo board</h2><span id="board-connected" class="pill">Checking</span></div><div class="panel-body"><p id="board-detail">Checking I²C1…</p><div class="rule"></div><table><thead><tr><th>Pi physical pin</th><th>PCA9685</th></tr></thead><tbody><tr><td>1 · 3.3 V</td><td>VCC · logic only</td></tr><tr><td>3 · GPIO2</td><td>SDA</td></tr><tr><td>5 · GPIO3</td><td>SCL</td></tr><tr><td>7 · GPIO4</td><td>OE · output enable</td></tr><tr><td>9 · ground</td><td>GND</td></tr></tbody></table><div class="power-note"><strong>Servo power is separate from logic power.</strong><p>Power the Pi through USB-C. Power servo V+ from a regulated supply sized for your servos, with a shared ground. Do not power sixteen servos from the Pi’s GPIO header.</p></div><p class="help">Use a pull-up from OE to 3.3 V to keep outputs disabled while the Pi boots. Stop outputs disables the signal; it does not cut servo power.</p></div></section><section class="panel"><div class="panel-head"><h2>Software updates</h2><span class="pill">MAIN</span></div><div class="panel-body"><p class="help">Checks AloeVeraZ/Counter on GitHub. Calibration is kept outside the installed release.</p><div class="metric"><span>Version</span><strong>v{{ version }}</strong></div><div class="metric"><span>Installed commit</span><code id="installed">—</code></div><div class="metric"><span>Latest commit</span><code id="latest">—</code></div><p id="update-detail" class="help">Choose Check for updates.</p><div class="button-group"><button id="check-updates">Check for updates</button><button class="primary" id="update" disabled>Update now</button></div><p class="help">Update now is available after installing on the Pi with install.sh. Outputs stop before the service restarts. Updates run only when requested.</p><a class="link" href="https://github.com/AloeVeraZ/Counter" target="_blank" rel="noopener">Open repository ↗</a><div class="rule"></div><p class="help">For an update failure, inspect <code>journalctl -u counter-update</code> on the Pi. The installer keeps the previous release if its health check fails.</p></div></section></div>
+    <div class="system-grid"><section class="panel">
+      <div class="panel-head"><h2>Servo board / wiring</h2><span id="board-connected" class="pill">Checking</span></div>
+      <div class="panel-body">
+        <p id="board-detail">Checking I²C1…</p><div class="rule"></div>
+        <figure class="wiring-figure">
+          <img src="/static/wiring.svg" alt="Complete wiring: Pi pins 1 VCC, 3 SDA, 5 SCL, 7 OE, 9 GND, 2 servo V+, plus the OE pull-up and each servo's three wires.">
+          <figcaption>Connection map, not physical board layout. <a href="/static/wiring.svg" target="_blank" rel="noopener">Open full-size diagram ↗</a></figcaption>
+        </figure>
+        <div class="wiring-table-wrap"><table>
+          <thead><tr><th>Pi physical pin</th><th>PCA9685 connection</th></tr></thead>
+          <tbody>
+            <tr><td>1 · 3.3 V</td><td>VCC · logic power</td></tr>
+            <tr><td>3 · GPIO2</td><td>SDA · I²C data</td></tr>
+            <tr><td>5 · GPIO3</td><td>SCL · I²C clock</td></tr>
+            <tr><td>7 · GPIO4 / BCM4</td><td>OE · high stops outputs</td></tr>
+            <tr><td>9 · GND</td><td>GND · common ground</td></tr>
+            <tr><td>2 · 5 V</td><td>V+ · servo power (prototype)</td></tr>
+            <tr><td>1 · 3.3 V → 1 kΩ resistor</td><td>OE · pull-up for startup</td></tr>
+          </tbody>
+        </table></div>
+        <p class="help">Keep VCC at 3.3 V. The 5 V motor wire goes to V+, never to VCC. OE stays connected to GPIO4; do not tie it to ground. USB-C powers the Pi.</p>
+        <h3>Every servo / three wires</h3>
+        <div class="wiring-table-wrap"><table>
+          <thead><tr><th>Servo wire</th><th>Its PCA9685 channel</th></tr></thead>
+          <tbody>
+            <tr><td>Signal · yellow / orange / white</td><td>PWM / signal</td></tr>
+            <tr><td>Power · red</td><td>V+ / positive · 5 V</td></tr>
+            <tr><td>Ground · brown / black</td><td>GND / negative</td></tr>
+          </tbody>
+        </table></div>
+        <p class="help">Repeat all three wires for each display. Leftmost display → CH 0, next → CH 1, through CH 15. Check connector labels; wire colours can vary.</p>
+        <div class="power-note"><strong>Pi-powered prototype: power budget unverified.</strong><p>The diagram shows Pi pin 2 → V+ for your setup. Moving one servo at a time does not guarantee enough current: a servo can still stall or brown out the Pi.</p><p>For a suitably rated external servo supply, remove the pin 2 → V+ wire, connect supply + to V+ and supply − to shared GND. Never connect external supply + to the Pi’s 5 V rail.</p></div>
+        <p class="help">Use a 1 kΩ OE pull-up to override the board’s weak pull-down; verify OE is high during boot. Stop outputs disables signals; it does not disconnect servo power.</p>
+      </div>
+    </section><section class="panel"><div class="panel-head"><h2>Software updates</h2><span class="pill">MAIN</span></div><div class="panel-body"><p class="help">Checks AloeVeraZ/Counter on GitHub. Calibration is kept outside the installed release.</p><div class="metric"><span>Version</span><strong>v{{ version }}</strong></div><div class="metric"><span>Installed commit</span><code id="installed">—</code></div><div class="metric"><span>Latest commit</span><code id="latest">—</code></div><p id="update-detail" class="help">Choose Check for updates.</p><div class="button-group"><button id="check-updates">Check for updates</button><button class="primary" id="update" disabled>Update now</button></div><p class="help">Update now is available after installing on the Pi with install.sh. Outputs stop before the service restarts. Updates run only when requested.</p><a class="link" href="https://github.com/AloeVeraZ/Counter" target="_blank" rel="noopener">Open repository ↗</a><div class="rule"></div><p class="help">For an update failure, inspect <code>journalctl -u counter-update</code> on the Pi. The installer keeps the previous release if its health check fails.</p></div></section></div>
   </section>
   <footer><span>COUNTER <span class="subtle">/ Servo-driven decimal displays</span></span><span class="subtle">1 board · Up to 16 displays</span></footer>
 </main>

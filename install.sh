@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the committed files in this checkout; never modifies MotionModule.
+# Install Counter's committed files into its own release directory.
 set -euo pipefail
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 if (( EUID != 0 )); then
@@ -20,7 +20,8 @@ flock -n 9 || { echo 'Another Counter install is running.' >&2; exit 1; }
 commit=$(git -C "$source_dir" rev-parse HEAD)
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || exit 1
 apt-get update
-apt-get install -y python3 python3-venv git curl i2c-tools swig build-essential
+# lgpio's source build needs Python headers and the native -llgpio library.
+apt-get install -y python3 python3-venv python3-dev liblgpio-dev libpam0g libpam-modules libpam-runtime git curl i2c-tools swig build-essential
 raspi-config nonint do_i2c 0
 usermod -a -G i2c,gpio "$install_user"
 install -d -m 755 /opt/counter/releases /usr/local/lib/counter
@@ -38,6 +39,12 @@ chown root:root /usr/local/sbin/counter-update
 printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/counter-update ""\n' "$install_user" > /etc/sudoers.d/counter-update
 chmod 440 /etc/sudoers.d/counter-update
 visudo -cf /etc/sudoers.d/counter-update
+cat > /etc/pam.d/counter <<'PAM'
+# Check this Pi's current account password; no Counter password database.
+auth required pam_unix.so
+account required pam_unix.so
+PAM
+chmod 644 /etc/pam.d/counter
 cat > /etc/systemd/system/counter.service <<UNIT
 [Unit]
 Description=Counter mechanical digit display
@@ -49,6 +56,7 @@ SupplementaryGroups=i2c gpio
 WorkingDirectory=/opt/counter/current
 Environment=COUNTER_RELEASE=/opt/counter/current
 Environment=GPIOZERO_PIN_FACTORY=lgpio
+Environment=COUNTER_LOGIN_USER=$install_user
 ExecStart=/opt/counter/current/.venv/bin/counter --host 0.0.0.0 --port 8080 --config /var/lib/counter/config.json
 Restart=on-failure
 RestartSec=3
@@ -61,14 +69,17 @@ ReadWritePaths=/var/lib/counter
 [Install]
 WantedBy=multi-user.target
 UNIT
-previous=$(readlink -f /opt/counter/current || true)
+previous=''
+if [[ -d /opt/counter/current ]]; then
+  previous=$(readlink -f /opt/counter/current)
+fi
 ln -sfn "$release" /opt/counter/current
 systemctl daemon-reload
 systemctl enable counter.service
 systemctl restart counter.service
 healthy=false
 for attempt in {1..20}; do
-  if curl --fail --silent http://127.0.0.1:8080/api/state | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("installed_commit") == sys.argv[1] else 1)' "$commit" 2>/dev/null && systemctl is-active --quiet counter.service; then healthy=true; break; fi
+  if curl --fail --silent http://127.0.0.1:8080/health | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("installed_commit") == sys.argv[1] else 1)' "$commit" 2>/dev/null && systemctl is-active --quiet counter.service; then healthy=true; break; fi
   sleep 1
 done
 if [[ $healthy != true ]]; then
@@ -78,9 +89,18 @@ if [[ $healthy != true ]]; then
     systemctl restart counter.service
   else
     systemctl stop counter.service
+    unlink /opt/counter/current
   fi
   exit 1
 fi
 echo "Counter installed: http://$(hostname).local:8080"
+for pi_address in $(hostname -I); do
+  [[ $pi_address == *:* ]] && continue
+  echo "Counter IP: http://$pi_address:8080"
+done
 echo 'Outputs start stopped. Calibration is stored in /var/lib/counter/config.json.'
-echo 'If I²C was previously disabled, reboot the Pi before connecting the board.'
+echo "After boot, open the Pi's current IP address on port 8080 and enter the Pi password for $install_user."
+if [[ -z $previous ]]; then
+  echo 'Initial install succeeded. Rebooting the Pi now; reconnect after it boots.'
+  systemctl reboot
+fi

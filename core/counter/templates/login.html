@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Counter</title>
+  <link rel="stylesheet" href="/static/counter.css">
+</head>
+<body>
+<main class="login-page">
+  <section class="panel login-panel">
+    <div class="panel-head"><h2>Counter</h2><span class="pill">v{{ version }}</span></div>
+    <div class="panel-body">
+      <p class="eyebrow">RASPBERRY PI / MECHANICAL DISPLAY</p>
+      <h1>Your display.</h1>
+      <p class="help">Enter this Raspberry Pi’s current password for <strong>{{ username }}</strong> to open Counter and calibrate your displays.</p>
+      {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
+      <form method="post" action="/login">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="username" value="{{ username }}" autocomplete="username">
+        <label class="field" for="password">Pi password
+          <input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required autofocus>
+        </label>
+        <button class="primary wide" type="submit">Open Counter</button>
+      </form>
+      <p class="help">Use the same password you use to log into this Pi. Signing in does not enable servo outputs.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>
