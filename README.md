@@ -175,10 +175,11 @@ power disconnect where needed.
 Servos are numbered by their board channel, 0–15; servo 0 is the leftmost digit.
 
 1. In **Calibrate → Your setup**, choose the number of digits (1–16). Save.
-2. Choose **Turn on servos** (it previews only in PC simulation).
-3. Pick a servo. For each number 0–9, press **−** or **+**, or type a pulse in
-   µs, until the number sits in its window; **Small steps** and **Big steps**
-   set how far each press moves. **Test** moves to the pulse in the box.
+2. Press **Start** in the top right (it previews only in PC simulation).
+3. Pick a servo. For each number 0–9, type a pulse in µs or press **−** / **+**
+   (10 µs each) until the number sits in its window. While the servos are on,
+   the pulse boxes are green and the servo moves as soon as you type or press;
+   **Test** moves to the pulse in the box again.
 4. Choose **Save servo N**. Unsaved rows are marked; grey pulses are
    suggestions that are **not saved calibration**, and the app refuses to show
    a number with no saved pulse.
@@ -194,9 +195,9 @@ that servo for editing. The board can't detect whether a servo is plugged in,
 so the list shows which channels are in use. Settings also holds the settle and
 pause timing.
 
-Turning on the servos allows movement commands; it does not itself move a
-servo. The same button turns them off again, as does **Stop** in the header.
-Nothing turns itself on at startup.
+**Start** allows movement commands; it does not itself move a servo. **Stop**,
+beside it in the header, turns the servos off at once. Nothing turns itself on
+at startup.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 The accepted envelope is 600–2400 µs; that is a software limit, **not a statement

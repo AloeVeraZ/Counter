@@ -44,7 +44,7 @@ details.more>summary:before{content:'▸';display:inline-block;margin-right:8px;
 details.more[open]>summary:before{transform:rotate(90deg)}
 .tips{margin:4px 0 0;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.7}
 .tips li+li{margin-top:6px}
-.control-bar{display:grid;grid-template-columns:minmax(0,1fr) 220px auto;align-items:center;gap:24px;padding:18px 22px;margin-bottom:20px}
+.control-bar{display:grid;grid-template-columns:minmax(0,1fr) 220px;align-items:center;gap:24px;padding:18px 22px;margin-bottom:20px}
 .control-bar.on{border-color:#45cf9a66}
 .control-copy strong{font:700 22px Barlow,Impact,sans-serif;text-transform:uppercase}
 .control-bar.on .control-copy strong{color:var(--green)}
@@ -106,3 +106,11 @@ details.more[open]>summary:before{transform:rotate(90deg)}
 .servo-table td.unset{color:var(--faint)}
 .servo-table tr.unused{opacity:.45}
 @media(max-width:480px){.calibration-row{grid-template-columns:28px 40px minmax(64px,1fr) 40px 52px;gap:5px}.calibration-row .row-status{grid-column:1/-1;text-align:left;padding-left:2px}.calibration-row .test{padding:6px}}
+button.start{background:#1d7a53;border-color:#45cf9a;color:#f4fff9;font-size:12px;min-height:40px;padding:8px 15px;font-weight:650}
+button.start:hover{background:#23905f}
+button.start:disabled{opacity:1;background:transparent;color:var(--green);border-color:#45cf9a66;cursor:default}
+.step-gap{margin-top:24px}
+/* Every box that edits or moves a servo turns green while the servos are on. */
+body.servos-on .pulse-field input,body.servos-on #number{border-color:var(--green);background:#45cf9a12;box-shadow:inset 0 0 0 1px #45cf9a55}
+body.servos-on .calibration-row .nudge,body.servos-on .calibration-row .test:not(:disabled){border-color:#45cf9a88}
+@media(max-width:780px){.tools .start{padding:8px 10px}}

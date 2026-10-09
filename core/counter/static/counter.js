@@ -1,8 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
-let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, previewTimer = null, draft = [], nudgeSize = 10, servoSignature = '';
-const MIN_PULSE = 600, MAX_PULSE = 2400;
+let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, previewTimer = null, draft = [], servoSignature = '';
+const MIN_PULSE = 600, MAX_PULSE = 2400, NUDGE = 10;
 function schedulePoll(delay) { clearTimeout(pollTimer); pollTimer = setTimeout(tick,delay); }
 function pollDelay() { if (document.hidden && !state?.armed) return 15000; return state?.busy || auto ? 500 : state?.armed ? 1000 : 3000; }
 function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = !message; $('notice').classList.toggle('error', error); }
@@ -49,10 +49,10 @@ function refreshCalibrationStatus() {
   $('copy-calibration').hidden = (state?.config.count || 1) < 2;
 }
 // Move to the latest − / + value once the previous move has finished, so quick taps do not pile up.
-function previewSoon(channel, width) {
+function previewSoon(channel, width, delay = 200) {
   clearTimeout(previewTimer);
   const attempt = () => { if (!state?.armed) return; if (state.busy || requestPending) { previewTimer = setTimeout(attempt, 250); return; } command('/api/preview', {channel, pulse_us: width}).catch(() => {}); };
-  previewTimer = setTimeout(attempt, 200);
+  previewTimer = setTimeout(attempt, delay);
 }
 function selectDisplay(channel) {
   if (channel === calChannel) return true;
@@ -73,12 +73,16 @@ function calibrationRows(force = false) {
     const input = element('input'); input.type = 'number'; input.min = MIN_PULSE; input.max = MAX_PULSE; input.step = '1'; input.inputMode = 'numeric';
     input.value = draft[digit] ?? ''; input.placeholder = String(suggested);
     input.setAttribute('aria-label', `Pulse for number ${digit} on servo ${channel}, in microseconds`);
-    input.addEventListener('input', () => { const text = input.value.trim(); draft[digit] = text ? Number(text) : null; refreshCalibrationStatus(); });
+    input.addEventListener('input', () => {
+      const text = input.value.trim(); draft[digit] = text ? Number(text) : null; refreshCalibrationStatus();
+      const width = Number(text);
+      if (state.armed && text && Number.isInteger(width) && width >= MIN_PULSE && width <= MAX_PULSE) previewSoon(channel, width, 450);
+    });
     input.addEventListener('change', () => { if (input.value.trim()) { draft[digit] = clampPulse(Number(input.value)); input.value = draft[digit]; refreshCalibrationStatus(); } });
     const nudge = direction => {
-      const width = clampPulse((draft[digit] ?? suggested) + direction * nudgeSize);
+      const width = clampPulse((draft[digit] ?? suggested) + direction * NUDGE);
       draft[digit] = width; input.value = width; refreshCalibrationStatus();
-      if (state.armed) previewSoon(channel, width); else notice('Turn on the servos to see it move.');
+      if (state.armed) previewSoon(channel, width); else notice('Press Start at the top to see it move.');
     };
     const minus = element('button', 'nudge', '−'); minus.setAttribute('aria-label', `Lower the pulse for number ${digit}`); minus.addEventListener('click', () => nudge(-1));
     const plus = element('button', 'nudge', '+'); plus.setAttribute('aria-label', `Raise the pulse for number ${digit}`); plus.addEventListener('click', () => nudge(1));
@@ -161,13 +165,13 @@ function render(value) {
   // One button turns the servos on to test and off again; Stop in the header always turns them off.
   $('control-title').textContent = value.armed ? 'Servos are on' : 'Servos are off';
   $('control-help').textContent = !value.board.connected && !value.simulated ? 'The servo board is offline. Check Settings → Servo board.'
-    : value.simulated ? 'This is a preview on this PC. No real servos move.'
-    : value.armed ? 'Displays move when you press − / +, Test, or Show. Turn off when you finish.'
-    : 'Turn them on to move the displays while you calibrate.';
-  $('arm').textContent = value.armed ? 'Turn off servos' : 'Turn on servos';
-  $('arm').classList.toggle('primary', !value.armed);
-  $('arm').closest('.control-bar').classList.toggle('on', value.armed);
-  $('arm').disabled = !value.armed && (value.busy || !value.board.connected);
+    : value.armed ? `Servos move when you type a pulse, press − / +, Test, or Show. Press Stop when you finish.${value.simulated ? ' (Preview only: no real servos.)' : ''}`
+    : `Press Start at the top to move the servos while you calibrate.${value.simulated ? ' This PC preview moves no real servos.' : ''}`;
+  // Start and Stop sit together in the header; Stop always works, Start only when the board is ready.
+  document.querySelector('.control-bar').classList.toggle('on', value.armed);
+  document.body.classList.toggle('servos-on', value.armed);
+  $('arm').disabled = value.armed || value.busy || !value.board.connected;
+  $('arm').textContent = value.armed ? 'Started' : 'Start';
   $('show-number').disabled = !value.armed || value.busy;
   document.querySelectorAll('[data-step]').forEach(button => {button.disabled = !value.armed || value.busy;});
   $('zero').disabled = !value.armed || value.busy;
@@ -212,8 +216,7 @@ function render(value) {
   if (value.error) notice(value.error,true);
 }
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>view(button.dataset.view)));
-document.querySelectorAll('[data-nudge]').forEach(button=>button.addEventListener('click',()=>{nudgeSize=Number(button.dataset.nudge);document.querySelectorAll('[data-nudge]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));}));
-$('arm').addEventListener('click',run(()=>{if(!state?.armed)return command('/api/arm',{},'Servos are on. Press − / + or Test to move a display.');setAuto(false);clearTimeout(previewTimer);return command('/api/stop',{},'Servos are off.');}));
+$('arm').addEventListener('click',run(()=>command('/api/arm',{},'Servos are on. Type a pulse, press − / +, or Test to move a servo.')));
 $('stop').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);return command('/api/stop',{},'Stopped. Servos are off.');}));
 if ($('logout')) $('logout').addEventListener('click',run(async()=>{setAuto(false);await command('/api/logout',{});window.location.assign('/login');}));
 $('number-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/number',{number:$('number').value.trim()}))();});
