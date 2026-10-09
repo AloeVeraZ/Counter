@@ -41,7 +41,7 @@ function refreshCalibrationStatus() {
   document.querySelectorAll('.calibration-row').forEach(row => {
     const digit = Number(row.dataset.digit), width = draft[digit] ?? null;
     const changed = width !== (saved[digit] ?? null);
-    row.classList.toggle('changed', changed); row.classList.toggle('saved', !changed && width !== null);
+    row.classList.toggle('changed', changed); row.classList.toggle('saved', !changed && width !== null); row.classList.toggle('unset', !changed && width === null);
     row.querySelector('.row-status').textContent = changed ? 'Not saved' : width === null ? 'Not set' : 'Saved';
   });
   $('save-calibration').textContent = changes ? `Save servo ${calChannel} · ${changes} change${changes === 1 ? '' : 's'}` : `Save servo ${calChannel}`;

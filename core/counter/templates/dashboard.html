@@ -25,7 +25,7 @@
   </section>
 
   <section data-page="calibration" hidden>
-    <div class="page-head"><div><h1>Calibrate</h1><p>Line up every number on each display, then try it out.</p></div></div>
+    <div class="hero"><div><p class="eyebrow">CALIBRATION / ONE PULSE PER NUMBER</p><h1>Find every number.</h1><p>Set where each servo stops for 0–9, then try a number.</p></div></div>
     <section class="panel control-bar">
       <div class="control-copy"><strong id="control-title">Servos are off</strong><p id="control-help">Turn them on to move the displays while you calibrate.</p></div>
       <div class="control-ready"><span>Displays ready</span><strong id="calibrated">0 of 2</strong><div class="meter"><div id="calibration-progress"></div></div></div>
@@ -36,10 +36,9 @@
         <div class="panel-body">
           <p class="step-label">1 · Choose a servo (board channel 0–15)</p>
           <div id="display-picker" class="display-picker" role="group" aria-label="Servo to calibrate"></div>
-          <p class="step-label step-gap">2 · Type a pulse or press − / + until each number sits in its window</p>
+          <p class="step-label">2 · Type a pulse or press − / + until each number sits in its window</p>
           <div id="calibration-rows" class="calibration-rows"></div>
-          <p class="step-label">3 · Save this servo</p>
-          <button class="primary wide" id="save-calibration">Save servo 0</button>
+                    <button class="primary wide" id="save-calibration">Save servo 0</button>
           <button class="link" id="copy-calibration" type="button">Same kind of servos? Copy servo 0 to the others</button>
           <details class="more"><summary>Tips</summary>
             <ul class="tips">
@@ -75,7 +74,7 @@
   </section>
 
   <section data-page="system" hidden>
-    <div class="page-head"><div><h1>Settings</h1><p>The servo board, software updates and exact servo values.</p></div></div>
+    <div class="hero"><div><p class="eyebrow">BOARD / UPDATES / SERVOS</p><h1>Behind the display.</h1><p>Check the servo board, install updates, and review every saved pulse.</p></div></div>
     <div class="system-grid">
       <section class="panel">
         <div class="panel-head"><h2>Servo board</h2><span id="board-connected" class="pill">Checking</span></div>
