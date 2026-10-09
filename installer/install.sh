@@ -25,6 +25,7 @@ trap 'status=$?; printf "Counter install failed while %s (line %s).\n" "$step" "
 [[ $install_user =~ ^[a-z_][a-z0-9_-]*[$]?$ && $install_user != root ]] || { echo 'Use --user with a non-root Pi username.' >&2; exit 2; }
 id "$install_user" >/dev/null
 [[ -f /proc/device-tree/model ]] && grep -q 'Raspberry Pi' /proc/device-tree/model || { echo 'This installer is for Raspberry Pi OS. Use counter --simulate on a PC.' >&2; exit 2; }
+umask 022
 exec 9>/run/counter-install.lock
 flock -n 9 || { echo 'Another Counter install is running.' >&2; exit 1; }
 commit=$(git -c safe.directory="$source_dir" -C "$source_dir" rev-parse HEAD)
@@ -40,6 +41,8 @@ raspi-config nonint do_i2c 0
 usermod -a -G i2c,gpio "$install_user"
 install -d -m 755 /opt/counter/releases /usr/local/lib/counter
 release=$(mktemp -d "/opt/counter/releases/${commit:0:7}-XXXXXX")
+# mktemp creates 0700 directories; the service user must be able to enter the release.
+chmod 755 "$release"
 step='building the Counter release'
 git -c safe.directory="$source_dir" -C "$source_dir" archive HEAD | tar -x -C "$release"
 printf '%s\n' "$commit" > "$release/INSTALL_COMMIT"
@@ -47,6 +50,8 @@ printf '%s\n' "$install_ref" > "$release/INSTALL_REF"
 /usr/bin/python3 -m venv --system-site-packages "$release/.venv"
 "$release/.venv/bin/python" -m pip install "$release[pi]"
 PYTHONPATH="$release/core" "$release/.venv/bin/python" -m unittest discover -s "$release/tests" -v
+step="checking that $install_user can run the release"
+runuser -u "$install_user" -- test -x "$release/.venv/bin/counter"
 step='configuring the Counter service'
 install -d -m 750 -o "$install_user" -g "$(id -gn "$install_user")" /var/lib/counter
 # Save the chosen account inside a root-owned helper, not in dashboard input.

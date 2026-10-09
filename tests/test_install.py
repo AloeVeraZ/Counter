@@ -90,6 +90,21 @@ journalctl() {{ echo 'service diagnostic'; }}
         self.assertTrue(link.endswith("/releases/old"))
 
 
+@unittest.skipUnless(BASH and os.name == "posix", "Release permission checks need POSIX modes")
+class InstallReleasePermissionTests(unittest.TestCase):
+    def test_release_directory_is_enterable_by_the_service_user(self):
+        source = (Path(__file__).parents[1] / "installer/install.sh").read_text(encoding="utf-8")
+        creation = source[source.index("release=$(mktemp"):source.index("step='building the Counter release'")]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "releases").mkdir()
+            script = f"set -euo pipefail\numask 077\ncommit={'a' * 40}\n" + creation.replace("/opt/counter", str(root)) + 'printf "%s" "$release"'
+            result = subprocess.run([BASH, "-c", script], text=True, capture_output=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # systemd's WorkingDirectory= runs as the service user, not root.
+            self.assertEqual(os.stat(result.stdout).st_mode & 0o777, 0o755)
+
+
 @unittest.skipUnless(BASH, "Installer launcher checks need Bash")
 class InstallLauncherTests(unittest.TestCase):
     def run_launcher(self, *args, stream=False):
