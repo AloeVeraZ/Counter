@@ -72,11 +72,17 @@ function calibrationRows(force = false) {
     const suggested = suggestedPulse(digit);
     const input = element('input'); input.type = 'number'; input.min = MIN_PULSE; input.max = MAX_PULSE; input.step = '1'; input.inputMode = 'numeric';
     input.value = draft[digit] ?? ''; input.placeholder = String(suggested);
-    input.setAttribute('aria-label', `Pulse for number ${digit} on servo ${channel}, in microseconds`);
+    input.setAttribute('aria-label', `Pulse for number ${digit} on servo ${channel}, in microseconds. Press Tab in an empty box to use the suggested ${suggested}.`);
     input.addEventListener('input', () => {
       const text = input.value.trim(); draft[digit] = text ? Number(text) : null; refreshCalibrationStatus();
       const width = Number(text);
       if (state.armed && text && Number.isInteger(width) && width >= MIN_PULSE && width <= MAX_PULSE) previewSoon(channel, width, 450);
+    });
+    // Tab in an empty box accepts the grey suggestion as this number's unsaved pulse.
+    input.addEventListener('keydown', event => {
+      if (event.key !== 'Tab' || input.value.trim()) return;
+      input.value = suggested; draft[digit] = suggested; refreshCalibrationStatus();
+      if (state.armed) previewSoon(channel, suggested);
     });
     input.addEventListener('change', () => { if (input.value.trim()) { draft[digit] = clampPulse(Number(input.value)); input.value = draft[digit]; refreshCalibrationStatus(); } });
     const nudge = direction => {

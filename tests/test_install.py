@@ -90,6 +90,18 @@ journalctl() {{ echo 'service diagnostic'; }}
         self.assertTrue(link.endswith("/releases/old"))
 
 
+class CalibrationPersistenceTests(unittest.TestCase):
+    def test_installs_on_any_channel_only_read_and_back_up_calibration(self):
+        source = (Path(__file__).parents[1] / "installer/install.sh").read_text(encoding="utf-8")
+        uses = [line.strip() for line in source.splitlines() if "config.json" in line]
+        # The service reads it, the installer copies it, and nothing else touches it.
+        self.assertIn("cp -p /var/lib/counter/config.json /var/lib/counter/config.before-update.json", uses)
+        for line in uses:
+            self.assertNotRegex(line, r"(rm|mv|truncate|>)\s*\S*config\.json\b(?!\.)", line)
+        self.assertIn("--config /var/lib/counter/config.json", source)
+        self.assertNotIn("$install_ref", " ".join(uses))  # same file whichever channel is installed
+
+
 class ServiceUnitTests(unittest.TestCase):
     def test_lgpio_works_in_a_writable_runtime_directory(self):
         source = (Path(__file__).parents[1] / "installer/install.sh").read_text(encoding="utf-8")

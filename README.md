@@ -181,7 +181,8 @@ Servos are numbered by their board channel, 0–15; servo 0 is the leftmost digi
    the pulse boxes are green and the servo moves as soon as you type or press;
    **Test** moves to the pulse in the box again.
 4. Choose **Save servo N**. Unsaved rows are marked; grey pulses are
-   suggestions that are **not saved calibration**, and the app refuses to show
+   suggestions that are **not saved calibration** until you accept one (press
+   **Tab** in an empty box) and save, and the app refuses to show
    a number with no saved pulse.
 5. Repeat for each servo. With identical servos, **Copy servo N to the others**
    saves the same pulses everywhere for you to fine-tune.
@@ -265,7 +266,9 @@ In **Settings → Software updates**, choose **Main · stable releases** or
 which one is currently installed. Check for updates, then choose **Update now**
 or **Switch to main/testing**. Testing requires acknowledging its warning.
 Switching stops outputs, installs the selected channel, and restarts Counter.
-Calibration and the Pi account password are preserved. After you confirm,
+Calibration and the Pi account password are preserved: pulses live in
+`/var/lib/counter/config.json`, outside every release, on both channels, and
+each install first copies them to `config.before-update.json`. After you confirm,
 a popup asks for the Pi password again; Counter checks it (sharing the login
 attempt limit) before anything starts and does not save it. The popup then
 closes and **Software updates** shows each installation stage and the live log.
