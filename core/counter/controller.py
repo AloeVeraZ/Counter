@@ -76,7 +76,7 @@ class Counter:
                 for tick in ticks:
                     width = self.store.data["positions"][channel][tick]
                     if width is None:
-                        raise ValueError(f"Number {tick} isn't set on display {channel + 1} yet. Line it up in Calibrate first.")
+                        raise ValueError(f"Number {tick} isn't set on servo {channel} yet. Set it in Calibrate first.")
                     moves.append((channel, width, str(tick)))
             self.requested = number
             self._start(moves)

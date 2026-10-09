@@ -49,7 +49,7 @@ class CounterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.counter.show("42")
         self.counter.arm()
-        with self.assertRaisesRegex(ValueError, "Number 4 isn't set on display 1"):
+        with self.assertRaisesRegex(ValueError, "Number 4 isn't set on servo 0"):
             self.counter.show("42")
         self.assertEqual(self.board.commands, [])
         self.assertEqual(self.counter.requested, "00")

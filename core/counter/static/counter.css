@@ -99,3 +99,10 @@ details.more[open]>summary:before{transform:rotate(90deg)}
 .metric{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;color:var(--muted);font-size:12px}.metric strong,.metric code{color:var(--ink);font-size:12px}
 .hero{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:28px}.hero p:not(.eyebrow){margin-top:12px;color:var(--muted);font-size:14px}.hero>.pill{margin-bottom:3px}
 @media(max-width:780px){.hero{align-items:flex-start;flex-direction:column;gap:14px;margin-bottom:22px}.hero p:not(.eyebrow){font-size:13px}}
+.calibration-row{grid-template-columns:40px 48px minmax(84px,120px) 48px 72px minmax(0,1fr)}
+.pulse-field{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint)}
+.pulse-field input{width:100%;min-width:0;min-height:44px;padding:8px;text-align:center;font-variant-numeric:tabular-nums;font-size:15px}
+.servo-table td{font-variant-numeric:tabular-nums}
+.servo-table td.unset{color:var(--faint)}
+.servo-table tr.unused{opacity:.45}
+@media(max-width:480px){.calibration-row{grid-template-columns:28px 40px minmax(64px,1fr) 40px 52px;gap:5px}.calibration-row .row-status{grid-column:1/-1;text-align:left;padding-left:2px}.calibration-row .test{padding:6px}}

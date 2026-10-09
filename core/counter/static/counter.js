@@ -33,20 +33,19 @@ for (let n = 1; n <= 16; n++) $('count').append(option(n, `${n} ${n === 1 ? 'dis
 // Unsaved starting points: number 0 at the minimum pulse, evenly up to the maximum for 9.
 function suggestedPulse(digit) { return Math.round(MIN_PULSE + digit * (MAX_PULSE - MIN_PULSE) / 9); }
 function clampPulse(width) { return Math.min(MAX_PULSE, Math.max(MIN_PULSE, Math.round(width))); }
-// Calibrate edits a draft of the chosen display's ten positions until Save.
+// Calibrate edits a draft of the chosen servo's ten pulses until Save. Servos use the board's channel numbers, 0–15.
 function savedPositions() { return state?.config.positions[calChannel] || []; }
 function unsavedCount() { const saved = savedPositions(); return draft.filter((width, digit) => width !== (saved[digit] ?? null)).length; }
 function refreshCalibrationStatus() {
   const saved = savedPositions(), changes = unsavedCount();
   document.querySelectorAll('.calibration-row').forEach(row => {
     const digit = Number(row.dataset.digit), width = draft[digit] ?? null;
-    const status = row.querySelector('.row-status');
     const changed = width !== (saved[digit] ?? null);
     row.classList.toggle('changed', changed); row.classList.toggle('saved', !changed && width !== null);
-    status.textContent = changed ? 'Not saved' : width === null ? 'Not set' : 'Saved';
+    row.querySelector('.row-status').textContent = changed ? 'Not saved' : width === null ? 'Not set' : 'Saved';
   });
-  $('save-calibration').textContent = changes ? `Save display ${calChannel + 1} · ${changes} change${changes === 1 ? '' : 's'}` : `Save display ${calChannel + 1}`;
-  $('copy-calibration').textContent = `Same servos? Copy display ${calChannel + 1} to the others`;
+  $('save-calibration').textContent = changes ? `Save servo ${calChannel} · ${changes} change${changes === 1 ? '' : 's'}` : `Save servo ${calChannel}`;
+  $('copy-calibration').textContent = `Same kind of servos? Copy servo ${calChannel} to the others`;
   $('copy-calibration').hidden = (state?.config.count || 1) < 2;
 }
 // Move to the latest − / + value once the previous move has finished, so quick taps do not pile up.
@@ -56,9 +55,10 @@ function previewSoon(channel, width) {
   previewTimer = setTimeout(attempt, 200);
 }
 function selectDisplay(channel) {
-  if (channel === calChannel) return;
-  if (unsavedCount() && !window.confirm(`Display ${calChannel + 1} has unsaved changes. Discard them?`)) return;
+  if (channel === calChannel) return true;
+  if (unsavedCount() && !window.confirm(`Servo ${calChannel} has unsaved changes. Discard them?`)) return false;
   setAuto(false); clearTimeout(previewTimer); calChannel = channel; pickerSignature = ''; calibrationRows(true); renderPicker();
+  return true;
 }
 function calibrationRows(force = false) {
   if (!state) return;
@@ -69,16 +69,23 @@ function calibrationRows(force = false) {
   draft = savedPositions().slice();
   $('calibration-rows').replaceChildren(...Array.from({length:10}, (_, digit) => {
     const row = element('div', 'calibration-row'); row.dataset.digit = digit;
+    const suggested = suggestedPulse(digit);
+    const input = element('input'); input.type = 'number'; input.min = MIN_PULSE; input.max = MAX_PULSE; input.step = '1'; input.inputMode = 'numeric';
+    input.value = draft[digit] ?? ''; input.placeholder = String(suggested);
+    input.setAttribute('aria-label', `Pulse for number ${digit} on servo ${channel}, in microseconds`);
+    input.addEventListener('input', () => { const text = input.value.trim(); draft[digit] = text ? Number(text) : null; refreshCalibrationStatus(); });
+    input.addEventListener('change', () => { if (input.value.trim()) { draft[digit] = clampPulse(Number(input.value)); input.value = draft[digit]; refreshCalibrationStatus(); } });
     const nudge = direction => {
-      const width = clampPulse((draft[digit] ?? suggestedPulse(digit)) + direction * nudgeSize);
-      draft[digit] = width; refreshCalibrationStatus();
-      if (state.armed) previewSoon(channel, width); else notice('Turn on the servos to see the display move.');
+      const width = clampPulse((draft[digit] ?? suggested) + direction * nudgeSize);
+      draft[digit] = width; input.value = width; refreshCalibrationStatus();
+      if (state.armed) previewSoon(channel, width); else notice('Turn on the servos to see it move.');
     };
-    const minus = element('button', 'nudge', '−'); minus.setAttribute('aria-label', `Move number ${digit} back`); minus.addEventListener('click', () => nudge(-1));
-    const plus = element('button', 'nudge', '+'); plus.setAttribute('aria-label', `Move number ${digit} forward`); plus.addEventListener('click', () => nudge(1));
+    const minus = element('button', 'nudge', '−'); minus.setAttribute('aria-label', `Lower the pulse for number ${digit}`); minus.addEventListener('click', () => nudge(-1));
+    const plus = element('button', 'nudge', '+'); plus.setAttribute('aria-label', `Raise the pulse for number ${digit}`); plus.addEventListener('click', () => nudge(1));
+    const field = element('label', 'pulse-field'); field.append(input, element('span', null, 'µs'));
     const test = element('button', 'test', 'Test'); test.setAttribute('aria-label', `Test number ${digit}`);
-    test.addEventListener('click', run(() => { setAuto(false); const width = draft[digit] ?? suggestedPulse(digit); return command('/api/preview', {channel, pulse_us: width}, draft[digit] === null || draft[digit] === undefined ? `Number ${digit} isn't set yet, so this tried a suggested position.` : ''); }));
-    row.append(element('span', 'digit-label', String(digit)), minus, plus, test, element('span', 'row-status'));
+    test.addEventListener('click', run(() => { setAuto(false); const width = draft[digit] ?? suggested; return command('/api/preview', {channel, pulse_us: width}, draft[digit] === null || draft[digit] === undefined ? `Number ${digit} isn't set yet, so this tried the suggested ${width} µs.` : ''); }));
+    row.append(element('span', 'digit-label', String(digit)), minus, field, plus, test, element('span', 'row-status'));
     return row;
   }));
   refreshCalibrationStatus();
@@ -93,55 +100,46 @@ function renderPicker() {
     const saved = positions[channel].filter(p => p !== null).length;
     const button = element('button', `display-chip${saved === 10 ? ' ready' : ''}${state.moving_channel === channel ? ' moving' : ''}`);
     button.type = 'button'; button.setAttribute('aria-pressed', String(channel === calChannel));
-    button.setAttribute('aria-label', `Display ${channel + 1}, ${saved} of 10 numbers saved`);
-    button.append(element('strong', null, String(channel + 1)), element('small', null, saved === 10 ? '✓ Ready' : `${saved}/10`));
+    button.setAttribute('aria-label', `Servo ${channel}, ${saved} of 10 numbers saved`);
+    button.append(element('strong', null, String(channel)), element('small', null, saved === 10 ? '✓ Ready' : `${saved}/10`));
     button.addEventListener('click', () => selectDisplay(channel));
     return button;
   }));
   const saved = positions[calChannel].filter(p => p !== null).length;
-  $('picked-status').textContent = `Display ${calChannel + 1} · ${saved} of 10 saved`;
+  $('picked-status').textContent = `Servo ${calChannel} · ${saved} of 10 saved`;
 }
-// Settings → Servos: the exact saved pulse for every number on every display.
+// Settings → Servos: a read-only overview of every channel's saved pulses; editing happens in Calibrate.
 function renderServoTable() {
   const {count, positions} = state.config;
   const signature = JSON.stringify([count, positions]);
   if (signature !== servoSignature) {
-    // Keep values someone is still typing in other rows.
-    const typed = {};
-    document.querySelectorAll('[data-servo-cell]').forEach(input => { if (input.dataset.dirty) typed[input.dataset.servoCell] = input.value; });
     servoSignature = signature;
-    $('servo-rows').replaceChildren(...Array.from({length:count}, (_, channel) => {
-      const tr = element('tr');
-      const name = element('th'); name.scope = 'row'; name.append(element('strong', null, `Display ${channel + 1}`), element('small', null, `Channel ${channel}`));
+    $('servo-rows').replaceChildren(...Array.from({length:16}, (_, channel) => {
+      const used = channel < count, tr = element('tr', used ? '' : 'unused');
+      const name = element('th'); name.scope = 'row'; name.append(element('strong', null, `Servo ${channel}`), element('small', null, used ? 'In use' : 'Not in use'));
       const now = element('td', 'servo-now'); now.id = `servo-now-${channel}`;
       tr.append(name, now);
       for (let digit = 0; digit < 10; digit++) {
-        const key = `${channel}:${digit}`, input = element('input');
-        input.type = 'number'; input.min = MIN_PULSE; input.max = MAX_PULSE; input.step = '1'; input.placeholder = '—';
-        input.dataset.servoCell = key; input.setAttribute('aria-label', `Display ${channel + 1}, number ${digit}, pulse in microseconds`);
-        input.value = positions[channel][digit] ?? '';
-        if (key in typed) { input.value = typed[key]; input.dataset.dirty = '1'; tr.classList.add('changed'); }
-        input.addEventListener('input', () => { input.dataset.dirty = '1'; tr.classList.add('changed'); });
-        const cell = element('td'); cell.append(input); tr.append(cell);
+        const width = positions[channel][digit];
+        const cell = element('td', width === null ? 'unset' : '', width === null ? '—' : String(width));
+        if (width === null) cell.setAttribute('aria-label', 'not set');
+        tr.append(cell);
       }
-      const save = element('button', 'servo-save', 'Save'); save.type = 'button'; save.setAttribute('aria-label', `Save display ${channel + 1}`);
-      save.addEventListener('click', run(() => saveServoRow(channel)));
-      const cell = element('td'); cell.append(save); tr.append(cell);
+      const cell = element('td');
+      if (used) {
+        const edit = element('button', 'servo-save', 'Calibrate'); edit.type = 'button'; edit.setAttribute('aria-label', `Calibrate servo ${channel}`);
+        edit.addEventListener('click', () => { view('calibration'); if (selectDisplay(channel)) $('digit-positions').scrollIntoView({behavior:'smooth', block:'start'}); });
+        cell.append(edit);
+      }
+      tr.append(cell);
       return tr;
     }));
   }
-  for (let channel = 0; channel < count; channel++) {
+  for (let channel = 0; channel < 16; channel++) {
     const cell = $(`servo-now-${channel}`); if (!cell) continue;
     const digit = state.digits[channel], pulse = digit === null || digit === undefined ? null : positions[channel][Number(digit)];
-    cell.textContent = state.moving_channel === channel ? 'Moving…' : digit === null || digit === undefined ? 'Unknown' : pulse ? `${digit} · ${pulse} µs` : String(digit);
+    cell.textContent = channel >= count ? '—' : state.moving_channel === channel ? 'Moving…' : digit === null || digit === undefined ? 'Unknown' : pulse ? `${digit} · ${pulse} µs` : String(digit);
   }
-}
-function saveServoRow(channel) {
-  const inputs = [...document.querySelectorAll(`[data-servo-cell^="${channel}:"]`)];
-  const values = inputs.map(input => input.value.trim() ? Number(input.value) : null);
-  inputs.forEach(input => { delete input.dataset.dirty; });
-  setAuto(false);
-  return command('/api/calibration', {channel, positions: values}, `Display ${channel + 1} saved. Servos are off.`);
 }
 function saveSetup(message) {
   setAuto(false);
@@ -158,7 +156,7 @@ function render(value) {
   $('connection').textContent = value.simulated ? 'Preview on this PC' : value.board.connected ? 'Board connected' : 'Board offline';
   $('connection').className = `status ${value.board.connected ? 'good' : 'bad'}`;
   $('mode').textContent = value.simulated ? 'SIMULATION · NO HARDWARE' : 'PCA9685 · 16 channels';
-  $('movement').textContent = value.busy ? value.moving_channel === null ? 'Pausing between moves' : `Moving display ${value.moving_channel + 1}` : value.armed ? 'Servos on' : 'Servos off';
+  $('movement').textContent = value.busy ? value.moving_channel === null ? 'Pausing between moves' : `Moving servo ${value.moving_channel}` : value.armed ? 'Servos on' : 'Servos off';
   $('movement').className = `status ${value.armed ? 'good' : ''}`;
   // One button turns the servos on to test and off again; Stop in the header always turns them off.
   $('control-title').textContent = value.armed ? 'Servos are on' : 'Servos are off';
@@ -208,7 +206,7 @@ function render(value) {
   $('board-connected').textContent = value.simulated ? 'PREVIEW' : value.board.connected ? 'CONNECTED' : 'OFFLINE';
   $('board-connected').className = `pill ${value.board.connected ? 'good' : 'bad'}`;
   $('board-summary').textContent = value.simulated ? 'Running as a preview on this PC. No servo board is used.'
-    : value.board.connected ? 'The servo board is connected and ready.'
+    : value.board.connected ? 'The servo board is powered and connected. Servos themselves can’t be detected, so the Servos list shows which channels are in use.'
     : 'Counter can’t reach the servo board. Check the wiring guide below, then restart Counter.';
   $('board-detail').textContent = value.board.message;
   if (value.error) notice(value.error,true);
@@ -225,16 +223,17 @@ $('auto').addEventListener('click',()=>setAuto(!auto));
 $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number($('interval').value);});
 $('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Servos are off.'))();});
 $('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved. Servos are off.'))();});
-$('save-calibration').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Display ${channel+1} saved. Servos are off.`).then(()=>calibrationRows(true));}));
-// For identical servos: copy one display's saved positions to the others, then fine-tune any that differ.
+$('save-calibration').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Servo ${channel} saved. Servos are off.`).then(()=>calibrationRows(true));}));
+// For identical servos: copy one servo's saved pulses to the others, then fine-tune any that differ.
 $('copy-calibration').addEventListener('click',run(async()=>{
   const source=calChannel, count=state.config.count, saved=state.config.positions[source].slice();
-  if(!saved.some(width=>width!==null)){notice(`Save some positions on display ${source+1} first.`,true);return;}
-  const extra=unsavedCount()?' Unsaved changes on this display are not copied.':'';
-  if(!window.confirm(`Copy display ${source+1}'s saved positions to the other ${count-1} display${count===2?'':'s'}? Their saved positions will be replaced.${extra}`))return;
+  if(!saved.some(width=>width!==null)){notice(`Save some pulses on servo ${source} first.`,true);return;}
+  const extra=unsavedCount()?' Unsaved changes on this servo are not copied.':'';
+  const others=Array.from({length:count},(_,channel)=>channel).filter(channel=>channel!==source).join(', ');
+  if(!window.confirm(`Copy servo ${source}'s saved pulses to servo${count===2?'':'s'} ${others}? Their saved pulses will be replaced.${extra}`))return;
   setAuto(false);clearTimeout(previewTimer);
   for(let channel=0;channel<count;channel++){if(channel!==source)await command('/api/calibration',{channel,positions:saved});}
-  notice(`Copied display ${source+1} to the other displays. Check each one and fine-tune any that look off.`);
+  notice(`Copied servo ${source} to the others. Check each one and fine-tune any that look off.`);
 }));
 function renderUpdates(){
   if(!updateState)return;

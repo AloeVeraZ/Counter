@@ -172,23 +172,27 @@ power disconnect where needed.
 
 ## Calibrate your digit mechanism
 
-1. In **Calibrate → Your setup**, choose the number of displays (1–16). Save.
+Servos are numbered by their board channel, 0–15; servo 0 is the leftmost digit.
+
+1. In **Calibrate → Your setup**, choose the number of digits (1–16). Save.
 2. Choose **Turn on servos** (it previews only in PC simulation).
-3. Pick a display (1 is the leftmost). For each number 0–9, press **−** or
-   **+** until it sits in its window; **Small steps** and **Big steps** set how
-   far each press moves. **Test** moves to that number's current position.
-4. Choose **Save display N**. Unsaved rows are marked; untouched numbers start
-   from a suggestion that is **not saved calibration**, and the app refuses to
-   show a number with no saved position.
-5. Repeat for each display. With identical servos, **Copy display N to the
-   others** saves the same positions everywhere for you to fine-tune.
+3. Pick a servo. For each number 0–9, press **−** or **+**, or type a pulse in
+   µs, until the number sits in its window; **Small steps** and **Big steps**
+   set how far each press moves. **Test** moves to the pulse in the box.
+4. Choose **Save servo N**. Unsaved rows are marked; grey pulses are
+   suggestions that are **not saved calibration**, and the app refuses to show
+   a number with no saved pulse.
+5. Repeat for each servo. With identical servos, **Copy servo N to the others**
+   saves the same pulses everywhere for you to fine-tune.
 6. In **Calibrate → Try a number**, enter a number. Leading zeros fill unused
    places. The **Display** tab shows the commanded number as a live preview.
 
-**Settings → Servos** lists every display's exact pulse width (µs) for each
-number, so different servos can be set differently. Edit a value there and save
-that row for precise changes. It also shows the number and pulse each display
-was last sent, and holds the settle and pause timing.
+Each servo keeps its own pulse for every number, so different servos can be set
+differently. **Settings → Servos** lists all sixteen channels with each saved
+pulse and the number each servo was last sent; its **Calibrate** button opens
+that servo for editing. The board can't detect whether a servo is plugged in,
+so the list shows which channels are in use. Settings also holds the settle and
+pause timing.
 
 Turning on the servos allows movement commands; it does not itself move a
 servo. The same button turns them off again, as does **Stop** in the header.
