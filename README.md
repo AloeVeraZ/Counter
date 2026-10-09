@@ -80,8 +80,11 @@ against powering servos from the Pi's 5 V rail because it can brown out the Pi:
 [PCA9685 power guidance](https://learn.adafruit.com/16-channel-pwm-servo-driver?view=all).
 
 Sixteen configured channels do **not** mean sixteen servos can safely draw
-power from the Pi's USB-C input. Sequential movement and releasing PWM reduce
-overlapping movement/holding loads, but do not establish a safe power budget.
+power from the Pi's USB-C input. The proposed proof-of-concept setup takes
+servo V+ from the Pi's 5 V header; this is **not a validated or recommended
+power configuration**, and Counter cannot measure or limit its current.
+Sequential movement and releasing PWM reduce overlapping commanded
+movement/holding loads, but do not establish a safe power budget.
 Releasing PWM does not cut power, guarantee zero current, or hold a digit in
 place. Stop outputs is a signal stop, not a power disconnect; use a physical
 power disconnect where needed.
@@ -105,7 +108,8 @@ Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 The accepted envelope is 600–2400 µs; that is a software limit, **not a statement
 that your servo can safely travel that far**. Use the servo's datasheet and the
 mechanism's clearance to choose a narrower actual range. Default settling time
-is 500 ms; adjust it to your mechanism. Positions are commanded without
+is 500 ms, followed by a default 500 ms pause before the next move; adjust
+both to your mechanism. Positions are commanded without
 feedback, so the UI cannot confirm physical alignment or detect a stalled or
 unplugged servo.
 
@@ -128,7 +132,22 @@ The +/− buttons count without wrapping at the maximum. Up to sixteen decimal
 digits are kept as strings; no JavaScript floating-point rounding occurs.
 Auto count runs while this dashboard is open and visible, waiting for each
 move to complete. It pauses on Stop, errors, tab hiding, or range overflow.
-The hardware worker always moves sequentially and Stop interrupts its wait.
+From a known last-commanded digit, the worker advances **one neighboring digit
+at a time**: for example, 2→3→4, then the next channel. Decreases run in reverse;
+9→0 passes through 8,7,…,0 rather than assuming the servo can wrap around a
+full turn. Every intermediate digit must be calibrated before motion begins.
+Each tick settles, releases that channel's PWM, and pauses before the next
+tick. At most one channel receives PWM; a hold mode is no longer available.
+The mechanism must retain its displayed digit without servo holding torque.
+
+After startup, Stop during a move, or manual calibration testing, a channel's
+position may be unknown. Its first explicit digit command sends the saved
+target position to establish a reference. **That first move is not guaranteed
+to be a small tick**, because there is no encoder or homing sensor. Nor can
+Counter confirm that a released mechanism stayed put. These commands require
+a position-controlled servo, not a continuous-rotation servo driven by timing.
+
+Stop interrupts settling and pauses immediately.
 Changing calibration/setup stops outputs. An interrupted move is marked unknown
 and is sent again when requested after enabling control again. To reduce idle
 traffic, the dashboard polls every three seconds with control disabled, every

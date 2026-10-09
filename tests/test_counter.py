@@ -27,6 +27,9 @@ class CounterTests(unittest.TestCase):
         self.store = ConfigStore(Path(self.temp.name) / "config.json")
         self.board = RecordingBoard()
         self.counter = Counter(self.store, self.board)
+        self.fast_wait = patch.object(self.counter.cancel, "wait", side_effect=lambda timeout: self.counter.cancel.is_set())
+        self.fast_wait.start()
+        self.addCleanup(self.fast_wait.stop)
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(self.counter.close)
 
@@ -100,6 +103,7 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(self.board.commands, [])
 
     def test_stop_interrupts_wait_and_prevents_next_channel(self):
+        self.fast_wait.stop()
         self.calibrate()
         self.store.data["settle_ms"] = 5000
         self.counter.arm()
@@ -121,6 +125,7 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(self.board.commands[-2:], [(0,1400),(1,1201)])
 
     def test_busy_commands_and_setup_are_rejected(self):
+        self.fast_wait.stop()
         self.calibrate()
         self.store.data["settle_ms"] = 5000
         self.counter.arm()
@@ -145,13 +150,13 @@ class CounterTests(unittest.TestCase):
         self.counter.configure({"count":2})
         self.assertEqual(self.store.data["positions"][1],table)
 
-    def test_hold_mode_and_write_failure(self):
+    def test_every_move_releases_even_with_legacy_hold_setting(self):
         self.calibrate()
         self.store.data["release_after_move"] = False
         self.counter.arm()
         self.counter.show("42")
         self.finish()
-        self.assertEqual(self.board.pulses,{0:1400,1:1201})
+        self.assertEqual(self.board.pulses,{})
         with patch.object(self.board,"write",side_effect=OSError("I2C gone")):
             self.counter.show("43")
             self.finish()
@@ -159,6 +164,85 @@ class CounterTests(unittest.TestCase):
         self.assertFalse(self.board.enabled)
         self.assertIn("I2C gone",self.counter.error)
         self.assertIsNone(self.counter.digits[1])
+
+    def test_known_positions_advance_by_one_digit_with_a_pause(self):
+        self.calibrate()
+        self.counter.digits[:2] = ['1','2']
+        self.counter.requested = '12'
+        self.counter.arm()
+        waits = []
+        with patch.object(self.counter.cancel, 'wait', side_effect=lambda seconds: waits.append(seconds) or False):
+            self.counter.show('43')
+            self.finish()
+        self.assertEqual(self.board.commands, [(0,1200),(0,1300),(0,1400),(1,1301)])
+        self.assertEqual(waits, [.1,.5,.1,.5,.1,.5,.1])
+        self.assertEqual(self.counter.digits[:2], ['4','3'])
+
+    def test_reverse_tick_path_requires_intermediate_calibration_before_motion(self):
+        self.calibrate()
+        self.counter.digits[:2] = ['4','2']
+        self.counter.requested = '42'
+        self.store.data['positions'][0][2] = None
+        self.counter.arm()
+        with self.assertRaisesRegex(ValueError,'Calibrate digit 2'):
+            self.counter.show('12')
+        self.assertEqual(self.board.commands, [])
+        self.assertEqual(self.counter.requested,'42')
+        self.store.data['positions'][0][2] = 1200
+        self.counter.show('12')
+        self.finish()
+        self.assertEqual(self.board.commands, [(0,1300),(0,1200),(0,1100)])
+
+    def test_at_most_one_active_pwm_across_all_sixteen_channels(self):
+        self.calibrate(16)
+        original_write = self.board.write
+        active = []
+        def checked_write(channel,width):
+            self.assertEqual(self.board.pulses,{})
+            original_write(channel,width)
+            active.append(len(self.board.pulses))
+        with patch.object(self.board,'write',side_effect=checked_write):
+            self.counter.arm()
+            self.counter.show('1234567890123456')
+            self.finish()
+        self.assertEqual(active,[1]*16)
+        self.assertEqual(self.board.pulses,{})
+
+    def test_old_config_preserves_calibration_and_disables_hold_mode(self):
+        data = defaults()
+        del data['pause_ms']
+        data['release_after_move'] = False
+        data['positions'][0][4] = 1400
+        self.store.path.write_text(json.dumps(data))
+        restored = ConfigStore(self.store.path)
+        self.assertEqual(restored.data['positions'][0][4],1400)
+        self.assertEqual(restored.data['pause_ms'],500)
+        self.assertTrue(restored.data['release_after_move'])
+        with self.assertRaises(ValueError):
+            self.counter.configure({'release_after_move':False})
+
+    def test_stop_during_pause_prevents_next_tick(self):
+        from threading import Event
+        self.fast_wait.stop()
+        self.calibrate()
+        self.counter.digits[:2] = ['1','2']
+        reached_pause = Event()
+        original_wait = self.counter.cancel.wait
+        def waiting(seconds):
+            if seconds == .1:
+                return False
+            reached_pause.set()
+            return original_wait(5)
+        self.counter.arm()
+        with patch.object(self.counter.cancel,'wait',side_effect=waiting):
+            self.counter.show('42')
+            self.assertTrue(reached_pause.wait(2))
+            self.assertEqual(self.board.pulses,{})
+            self.counter.stop()
+            self.finish()
+        self.assertEqual(self.board.commands,[(0,1200)])
+        self.assertEqual(self.counter.digits[0],'2')
+        self.assertFalse(self.counter.armed)
 
     def test_invalid_config_does_not_overwrite_calibration(self):
         self.calibrate()

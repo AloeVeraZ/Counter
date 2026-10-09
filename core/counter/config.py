@@ -20,7 +20,7 @@ def pulse(value):
 
 
 def defaults():
-    return {"count": 2, "settle_ms": 500, "release_after_move": True,
+    return {"count": 2, "settle_ms": 500, "pause_ms": 500, "release_after_move": True,
             "positions": [[None] * 10 for _ in range(16)]}
 
 
@@ -29,8 +29,9 @@ def validate(data):
         raise ValueError("Configuration has missing or unknown fields.")
     integer(data["count"], 1, 16, "Display count")
     integer(data["settle_ms"], 100, 5000, "Settling time (ms)")
-    if type(data["release_after_move"]) is not bool:
-        raise ValueError("Release after moving must be true or false.")
+    integer(data["pause_ms"], 100, 5000, "Pause between moves (ms)")
+    if data["release_after_move"] is not True:
+        raise ValueError("Signals must be released between digit moves.")
     positions = data["positions"]
     if not isinstance(positions, list) or len(positions) != 16:
         raise ValueError("Exactly sixteen channel calibration tables are required.")
@@ -46,7 +47,16 @@ def validate(data):
 class ConfigStore:
     def __init__(self, path):
         self.path = Path(path)
-        self.data = validate(json.loads(self.path.read_text("utf-8"))) if self.path.exists() else defaults()
+        if not self.path.exists():
+            self.data = defaults()
+            return
+        data = json.loads(self.path.read_text("utf-8"))
+        # Preserve every calibration when upgrading the earlier configuration.
+        if isinstance(data, dict):
+            data.setdefault("pause_ms", 500)
+            if data.get("release_after_move") is False:
+                data["release_after_move"] = True
+        self.data = validate(data)
 
     def save(self, data):
         candidate = validate(data)

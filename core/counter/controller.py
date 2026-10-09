@@ -62,11 +62,22 @@ class Counter:
             number = number.zfill(count)
             moves = []
             for channel, digit in enumerate(number):
-                width = self.store.data["positions"][channel][int(digit)]
-                if width is None:
-                    raise ValueError(f"Calibrate digit {digit} on channel {channel} first.")
-                if self.digits[channel] != digit:
-                    moves.append((channel, width, digit))
+                current = self.digits[channel]
+                if current == digit:
+                    continue
+                target = int(digit)
+                if current is None:
+                    # No encoder: the first explicit command establishes a reference.
+                    ticks = [target]
+                else:
+                    previous = int(current)
+                    direction = 1 if target > previous else -1
+                    ticks = range(previous + direction, target + direction, direction)
+                for tick in ticks:
+                    width = self.store.data["positions"][channel][tick]
+                    if width is None:
+                        raise ValueError(f"Calibrate digit {tick} on channel {channel} first.")
+                    moves.append((channel, width, str(tick)))
             self.requested = number
             self._start(moves)
 
@@ -97,7 +108,7 @@ class Counter:
 
     def _move(self, moves, settings):
         try:
-            for channel, width, digit in moves:
+            for index, (channel, width, digit) in enumerate(moves):
                 with self.lock:
                     if self.cancel.is_set():
                         break
@@ -109,10 +120,12 @@ class Counter:
                 with self.lock:
                     if self.cancel.is_set():
                         break
-                    if settings["release_after_move"]:
-                        self.board.release(channel)
+                    # One active PWM channel, including between ticks on the same servo.
+                    self.board.release(channel)
                     self.digits[channel] = digit
                     self.moving_channel = None
+                if index < len(moves) - 1 and self.cancel.wait(settings["pause_ms"] / 1000):
+                    break
         except Exception as error:
             with self.lock:
                 self.error = f"Movement failed: {error}"
@@ -131,7 +144,7 @@ class Counter:
         with self.lock:
             if self.busy:
                 raise ValueError("Stop movement and wait before changing configuration.")
-            if not isinstance(fields, dict) or not fields or set(fields) - {"count", "settle_ms", "release_after_move"}:
+            if not isinstance(fields, dict) or not fields or set(fields) - {"count", "settle_ms", "pause_ms", "release_after_move"}:
                 raise ValueError("Unknown or missing setup fields.")
             data = {**deepcopy(self.store.data), **fields}
             from .config import validate

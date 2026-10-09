@@ -49,13 +49,14 @@ function calibrationRows(force = false) {
 function render(value) {
   if (value.instance && value.instance !== token.slice(0,12)) { window.location.reload(); return; }
   state = value;
-  const {count,settle_ms,release_after_move,positions} = value.config;
+  const {count,settle_ms,positions} = value.config;
+  const pause_ms = value.config.pause_ms ?? 500;
   const ready = positions.slice(0,count).filter(row => row.every(p => p !== null)).length;
   $('connection').textContent = value.simulated ? 'Simulation' : value.board.connected ? 'Board connected' : 'Board offline';
   $('connection').className = `status ${value.board.connected ? 'good' : 'bad'}`;
   $('mode').textContent = value.simulated ? 'SIMULATION · NO HARDWARE' : 'PCA9685 · 16 channels';
   const controlName = value.simulated ? 'Preview controls' : 'Servo control';
-  $('movement').textContent = value.busy ? `Moving CH ${value.moving_channel ?? '…'}` : `${controlName} ${value.armed ? 'enabled' : 'disabled'}`;
+  $('movement').textContent = value.busy ? value.moving_channel === null ? 'Pause between digit moves' : `Moving CH ${value.moving_channel}` : `${controlName} ${value.armed ? 'enabled' : 'disabled'}`;
   $('movement').className = `status ${value.armed ? 'good' : ''}`;
   $('armed-label').textContent = value.armed ? 'ENABLED' : 'DISABLED';
   const enableLabel = value.armed ? `${controlName} enabled` : `Enable ${controlName.toLowerCase()}`;
@@ -77,11 +78,16 @@ function render(value) {
   $('display-count').textContent = count; $('last-channel').textContent = count - 1;
   $('range-label').textContent = `${'0'.repeat(count)}–${'9'.repeat(count)}`;
   $('number').maxLength = count;
-  const signature = `${count}:${settle_ms}:${release_after_move}`;
+  const signature = `${count}:${settle_ms}:${pause_ms}`;
   if (signature !== setupSignature) {
     setupSignature = signature; $('count').value = count;
     if (![...$('settle').options].some(o => Number(o.value) === settle_ms)) $('settle').append(option(settle_ms, `${settle_ms} ms`));
-    $('settle').value = settle_ms; $('release').checked = release_after_move;
+    $('settle').value = settle_ms;
+    if ($('pause')) {
+      if (![...$('pause').options].some(o => Number(o.value) === pause_ms)) $('pause').append(option(pause_ms,`${pause_ms} ms`));
+      $('pause').value = pause_ms;
+    }
+    if ($('release')) { $('release').checked = true; $('release').disabled = true; }
     $('number').value = value.number;
     const selected = Math.min(Number($('cal-channel').value || 0),count-1);
     $('cal-channel').replaceChildren(...Array.from({length:count},(_,channel) => option(channel, `CH ${channel} · Display ${channel+1}`)));
@@ -134,7 +140,7 @@ document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener
 $('zero').addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/number',{number:'0'});$('number').value=result.number;}));
 $('auto').addEventListener('click',()=>setAuto(!auto));
 $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number($('interval').value);});
-$('setup-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/setup',{count:Number($('count').value),settle_ms:Number($('settle').value),release_after_move:$('release').checked},'Setup saved. Outputs are stopped.'))();});
+$('setup-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);const settings={count:Number($('count').value),settle_ms:Number($('settle').value),release_after_move:true};if($('pause'))settings.pause_ms=Number($('pause').value);run(()=>command('/api/setup',settings,'Setup saved. Outputs are stopped.'))();});
 $('save-calibration').addEventListener('click',run(()=>{setAuto(false);return command('/api/calibration',{channel:Number($('cal-channel').value),positions:[...document.querySelectorAll('[data-digit]')].map(input=>input.value.trim()?Number(input.value):null)},'Digit positions saved. Outputs are stopped.');}));
 function jog(delta=0){setAuto(false);const width=Number($('jog-pulse').value)+delta;$('jog-pulse').value=width;return command('/api/preview',{channel:Number($('cal-channel').value),pulse_us:width});}
 $('jog').addEventListener('click',run(()=>jog()));$('jog-minus').addEventListener('click',run(()=>jog(-10)));$('jog-plus').addEventListener('click',run(()=>jog(10)));
