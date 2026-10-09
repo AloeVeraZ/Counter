@@ -49,10 +49,49 @@ class CounterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.counter.show("42")
         self.counter.arm()
-        with self.assertRaisesRegex(ValueError, "Calibrate digit 4 on channel 0"):
+        with self.assertRaisesRegex(ValueError, "Number 4 isn't set on servo 0"):
             self.counter.show("42")
         self.assertEqual(self.board.commands, [])
         self.assertEqual(self.counter.requested, "00")
+
+    def test_configuration_test_counts_each_servo_up_then_snaps_to_zero(self):
+        self.calibrate(count=2)
+        with self.assertRaises(ValueError):
+            self.counter.test_sequence()  # servos off
+        self.counter.arm()
+        self.assertEqual(self.counter.test_sequence(), ([0, 1], []))
+        self.finish()
+        path = [0, *range(1, 10), 0]
+        expected = [(channel, 1000 + tick * 100 + channel) for channel in (0, 1) for tick in path]
+        self.assertEqual(self.board.commands, expected)
+        self.assertEqual(self.counter.digits[:2], ["0", "0"])
+        self.assertEqual(self.board.pulses, {})  # released after every move
+
+    def test_configuration_test_snaps_to_zero_from_a_known_digit_and_skips_unset_servos(self):
+        self.calibrate(count=3)
+        data = deepcopy(self.store.data)
+        data["positions"][1][7] = None
+        self.store.save(data)
+        self.counter.digits[0] = "3"
+        self.counter.arm()
+        self.assertEqual(self.counter.test_sequence(), ([0, 2], [1]))
+        self.finish()
+        ticks = [width - 1000 for channel, width in self.board.commands if channel == 0]
+        self.assertEqual([tick // 100 for tick in ticks], [0, *range(1, 10), 0])
+        self.assertNotIn(1, {channel for channel, _ in self.board.commands})
+
+    def test_configuration_test_needs_one_fully_calibrated_servo_and_stops_on_request(self):
+        self.counter.arm()
+        with self.assertRaisesRegex(ValueError, "at least one servo"):
+            self.counter.test_sequence()
+        self.calibrate(count=1)
+        self.fast_wait.stop()
+        self.counter.test_sequence()
+        self.counter.stop()
+        self.counter.worker.join(timeout=4)
+        self.assertLess(len(self.board.commands), 11)
+        self.assertFalse(self.board.enabled)
+        self.fast_wait.start()
 
     def test_decimal_digit_mapping_and_only_changed_channels(self):
         self.calibrate()
@@ -184,7 +223,7 @@ class CounterTests(unittest.TestCase):
         self.counter.requested = '42'
         self.store.data['positions'][0][2] = None
         self.counter.arm()
-        with self.assertRaisesRegex(ValueError,'Calibrate digit 2'):
+        with self.assertRaisesRegex(ValueError,"Number 2 isn't set"):
             self.counter.show('12')
         self.assertEqual(self.board.commands, [])
         self.assertEqual(self.counter.requested,'42')
@@ -323,7 +362,7 @@ class HardwareTests(unittest.TestCase):
 
 class FakeUpdates:
     def snapshot(self,refresh=False): return {"available":False,"checking":False}
-    def start(self): return "Update started"
+    def start(self,branch=None,*,acknowledge_testing=False): return "Update started"
 
 
 class WebTests(unittest.TestCase):
@@ -343,13 +382,27 @@ class WebTests(unittest.TestCase):
 
     def test_dashboard_and_static_assets_work_offline(self):
         html=self.client.get('/').get_data(as_text=True)
-        self.assertIn('Make numbers move.',html)
+        for page in ['data-page="display"','data-page="calibration"','data-page="system"','id="servo-rows"']:
+            self.assertIn(page,html)
         for path in ['/static/counter.css','/static/counter.js','/static/fonts/inter-latin.woff2']:
             with self.client.get(path) as response:
                 self.assertEqual(response.status_code,200)
         state=self.client.get('/api/state').json
         self.assertTrue(state['simulated'])
         self.assertFalse(state['armed'])
+
+    def test_configuration_test_endpoint_reports_tested_and_skipped_servos(self):
+        self.assertEqual(self.post('/api/test-sequence',{}).status_code,400)  # servos off
+        data=deepcopy(self.counter.store.data)
+        data['positions'][0]=[1000+digit*100 for digit in range(10)]
+        self.counter.store.save(data)
+        self.post('/api/arm',{})
+        response=self.post('/api/test-sequence',{})
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertIn('Testing servo 0',response.json['message'])
+        self.assertIn('Skipped servo 1',response.json['message'])
+        self.counter.stop()
+        self.counter.worker.join(timeout=4)
 
     def test_commands_require_token_and_same_origin(self):
         self.assertEqual(self.client.post('/api/arm',json={}).status_code,403)
@@ -373,6 +426,57 @@ class WebTests(unittest.TestCase):
         self.counter.arm()
         self.assertEqual(self.post('/api/updates',{}).status_code,200)
         self.assertFalse(self.counter.armed)
+
+    def test_release_channel_switch_is_validated_and_stops_outputs(self):
+        from counter.updates import Updates
+        helper=Path(self.temp.name)/'update-helper'
+        helper.touch()
+        updater=Updates(Path(self.temp.name))
+        client=create_app(self.counter,updater).test_client()
+        import re
+        html=client.get('/').get_data(as_text=True)
+        headers={'X-Counter-Token':re.search(r'name="counter-token" content="([^"]+)"',html)[1]}
+        with patch('counter.updates.HELPER',helper),patch('counter.updates.subprocess.run',return_value=type('Result',(),{'returncode':0})()) as run:
+            self.assertEqual(client.post('/api/updates',json={'branch':'testing'},headers=headers).status_code,400)
+            self.assertEqual(client.post('/api/updates',json={'branch':'other','acknowledge_testing':True},headers=headers).status_code,400)
+            run.assert_not_called()
+            self.counter.arm()
+            self.assertEqual(client.post('/api/updates',json={'branch':'testing','acknowledge_testing':True},headers=headers).status_code,200)
+            self.assertFalse(self.counter.armed)
+            self.assertEqual(run.call_args.args[0][-1],'testing')
+            self.assertEqual(client.post('/api/updates',json={'branch':'main'},headers=headers).status_code,200)
+            self.assertEqual(run.call_args.args[0][-1],'main')
+
+
+class UpdateProgressWebTests(unittest.TestCase):
+    def test_job_progress_identifies_this_service_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            counter=Counter(ConfigStore(Path(directory)/'config.json'),SimulatedBoard())
+            self.addCleanup(counter.close)
+            client=create_app(counter,FakeUpdates()).test_client()
+            import re
+            token=re.search(r'name="counter-token" content="([^"]+)"',client.get('/').get_data(as_text=True))[1]
+            with patch('counter.updates.UPDATE_LOG',Path(directory)/'update.log'):
+                job=client.get('/api/updates/job').get_json()
+        # The dashboard reloads once a restarted service answers with another instance.
+        self.assertEqual(job['instance'],token[:12])
+        self.assertEqual(job['state'],'idle')
+
+
+class EntryPointTests(unittest.TestCase):
+    def serve_with(self,*args):
+        from counter import __main__ as entry
+        with tempfile.TemporaryDirectory() as directory, patch('waitress.serve') as serve, patch('signal.signal'), patch('atexit.register'):
+            with patch('sys.argv',['counter','--simulate','--config',str(Path(directory)/'config.json'),*args]):
+                entry.main()
+        return serve.call_args.kwargs['listen']
+
+    def test_default_port_is_8080(self):
+        self.assertEqual(self.serve_with(),'127.0.0.1:8080')
+
+    def test_repeated_ports_listen_on_each(self):
+        # The Pi service serves port 80 for bare-IP browsing and 8080 for older links.
+        self.assertEqual(self.serve_with('--host','0.0.0.0','--port','80','--port','8080'),'0.0.0.0:80 0.0.0.0:8080')
 
 
 if __name__=='__main__': unittest.main()

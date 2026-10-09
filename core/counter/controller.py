@@ -16,6 +16,7 @@ class Counter:
         self.requested = "0".zfill(store.data["count"])
         self.digits = [None] * 16
         self.moving_channel = None
+        self.moving_digit = None
         self.error = ""
         self.board.disable()
 
@@ -27,7 +28,7 @@ class Counter:
                 self.armed = False
             return {"config": deepcopy(self.store.data), "number": self.requested,
                     "digits": self.digits[:self.store.data["count"]], "armed": self.armed,
-                    "busy": self.busy, "moving_channel": self.moving_channel,
+                    "busy": self.busy, "moving_channel": self.moving_channel, "moving_digit": self.moving_digit,
                     "error": self.error, "board": board, "simulated": self.board.simulated}
 
     def arm(self):
@@ -51,7 +52,7 @@ class Counter:
         if self.busy:
             raise ValueError("A display is moving. Wait or press Stop.")
         if not self.armed:
-            raise ValueError("Servo control is disabled. Enable servo control before moving a display.")
+            raise ValueError("The servos are off. Turn them on in Calibrate first.")
 
     def show(self, number):
         with self.lock:
@@ -76,7 +77,7 @@ class Counter:
                 for tick in ticks:
                     width = self.store.data["positions"][channel][tick]
                     if width is None:
-                        raise ValueError(f"Calibrate digit {tick} on channel {channel} first.")
+                        raise ValueError(f"Number {tick} isn't set on servo {channel} yet. Set it in Calibrate first.")
                     moves.append((channel, width, str(tick)))
             self.requested = number
             self._start(moves)
@@ -88,6 +89,33 @@ class Counter:
             if not 0 <= value < 10 ** self.store.data["count"]:
                 raise ValueError("That step exceeds the display range.")
             self.show(str(value))
+
+    def test_sequence(self):
+        """Count each fully calibrated servo, one after another, from 0 up to 9, then snap back to 0.
+
+        The whole path is planned and validated before anything moves. Counting up
+        visits every number; the return to 0 (and the first move to 0) is one move,
+        the owner's chosen exception to stepping through neighbours, since 0 is the
+        mechanism's starting position. Servos without all ten numbers are skipped.
+        """
+        with self.lock:
+            self._ready()
+            count = self.store.data["count"]
+            positions = self.store.data["positions"]
+            tested = [channel for channel in range(count) if None not in positions[channel]]
+            skipped = [channel for channel in range(count) if channel not in tested]
+            if not tested:
+                raise ValueError("Set all ten numbers on at least one servo in Calibrate before testing.")
+            moves = []
+            requested = list(self.requested.zfill(count))
+            for channel in tested:
+                start = [] if self.digits[channel] == "0" else [0]
+                path = start + list(range(1, 10)) + [0]
+                moves += [(channel, positions[channel][tick], str(tick)) for tick in path]
+                requested[channel] = "0"
+            self.requested = "".join(requested)
+            self._start(moves)
+            return tested, skipped
 
     def preview(self, channel, width):
         with self.lock:
@@ -112,7 +140,7 @@ class Counter:
                 with self.lock:
                     if self.cancel.is_set():
                         break
-                    self.moving_channel = channel
+                    self.moving_channel, self.moving_digit = channel, digit
                     self.digits[channel] = None
                     self.board.write(channel, width)
                 if self.cancel.wait(settings["settle_ms"] / 1000):
@@ -123,7 +151,7 @@ class Counter:
                     # One active PWM channel, including between ticks on the same servo.
                     self.board.release(channel)
                     self.digits[channel] = digit
-                    self.moving_channel = None
+                    self.moving_channel = self.moving_digit = None
                 if index < len(moves) - 1 and self.cancel.wait(settings["pause_ms"] / 1000):
                     break
         except Exception as error:
@@ -138,7 +166,7 @@ class Counter:
         finally:
             with self.lock:
                 self.busy = False
-                self.moving_channel = None
+                self.moving_channel = self.moving_digit = None
 
     def configure(self, fields):
         with self.lock:

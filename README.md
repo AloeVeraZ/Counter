@@ -5,12 +5,81 @@ has one position-controlled servo that reveals a digit from 0–9. One PCA9685
 board provides all sixteen channels. No DC motor, camera, Arduino, or drive
 logic is included.
 
-The dashboard follows MotionModule's dark panels, steel-blue controls, and
-self-hosted Barlow Condensed / Inter typography. The display preview resembles
+The dashboard uses dark panels, steel-blue controls, and self-hosted
+Barlow Condensed / Inter typography. The display preview resembles
 the individual windowed digit modules. It works offline after installation.
 
-## Use it on your PC
+## Install on Raspberry Pi OS
 
+Use 64-bit Raspberry Pi OS with Python 3.11+, your existing Wi-Fi/Ethernet
+connection, and the standard 40-pin GPIO header.
+
+From an existing checkout on your Pi, get the testing build and install it:
+
+```bash
+git fetch origin
+git switch testing
+git pull --ff-only origin testing
+bash install.sh --branch testing
+```
+
+For a fresh Pi, download the installer directly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AloeVeraZ/Counter/testing/install.sh | bash -s -- --branch testing
+```
+
+For the main release channel:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AloeVeraZ/Counter/main/install.sh | bash -s -- --branch main
+```
+
+**Testing is experimental and can break installation or servo behavior.**
+Both channels need this installer revision for web switching. While these
+changes are awaiting review and merge, use `testing`. From a checkout,
+`bash install.sh` uses its `main` or `testing` branch; `--branch` explicitly
+selects a channel and downloads it when it differs from the checkout.
+
+
+The installer enables I²C, installs a `counter` service, and **reboots the Pi
+after the first successful install**. Wait for it to come back online, then open
+**http://PI-IP** (or **http://YOUR-PI-HOSTNAME.local**) and enter the
+current password of the Pi account that ran `bash install.sh`. There is no
+username field or separate Counter password. Login uses this Pi's local PAM
+password check, so different Pis use their own passwords and password changes
+apply on the next login. Login does not enable servo outputs.
+
+Subsequent installs and dashboard updates restart Counter without rebooting the
+Pi. Counter uses its own service, release directory, and calibration file.
+The installer keeps the Pi's existing hostname and network connection.
+Stop any other controller using the same hardware before running Counter:
+**two programs must never control this PCA9685 / OE pin together**.
+The first reboot activates I²C if it was previously disabled. The installer is shipped and tested
+for syntax, but has not been executed on a physical Pi in this development run.
+
+Counter's releases live in `/opt/counter/releases`; calibration lives in
+`/var/lib/counter/config.json`, outside the release. The service starts with
+outputs stopped. Startup, service restarts, and updates do not restore motion.
+
+```bash
+sudo systemctl status counter
+journalctl -u counter -n 60
+```
+
+The installer uses Raspberry Pi OS's **`python3-lgpio`** package and a
+virtual environment with access to that system package. It uses
+`/usr/bin/python3`, so the GPIO extension matches the OS's Python version and
+pip does not have to build an `lgpio` wheel. This follows the
+[GPIO Zero virtual environment guidance](https://gpiozero.readthedocs.io/en/latest/installing.html#virtual-environment).
+
+If installation fails, its output names the failing stage. A service startup
+failure prints recent service logs and restores the previous active release.
+Calibration stays in `/var/lib/counter/config.json`.
+
+## PC simulation (Windows PowerShell)
+
+These commands are for **Windows PowerShell**, not the Pi’s Bash terminal.
 Python 3.11 or newer:
 
 ```powershell
@@ -23,37 +92,23 @@ Open **http://127.0.0.1:8080**. Simulation never touches GPIO or I²C. Its
 calibration is saved in `~/.counter/config.json`; use `--config PATH` to choose
 another file. Hardware mode never silently falls back to simulation.
 
-## Install on Raspberry Pi OS
-
-Use 64-bit Raspberry Pi OS with Python 3.11+, your existing Wi-Fi/Ethernet
-connection, and the standard 40-pin GPIO header.
+For Linux/macOS simulation (including previewing on a Pi):
 
 ```bash
-git clone https://github.com/AloeVeraZ/Counter.git
-cd Counter
-bash install.sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
+.venv/bin/counter --simulate
 ```
 
-The installer enables I²C, installs a `counter` service, and serves the UI on
-**http://YOUR-PI-HOSTNAME.local:8080** (or the Pi's IP address). It does not change
-the hostname or Wi-Fi, install a hotspot, or modify MotionModule's files. If
-MotionModule is installed on this same Pi, stop its runtime before running
-Counter: **two programs must never control this PCA9685 / OE pin together**.
-Reboot once if I²C was previously disabled. The installer is shipped and tested
-for syntax, but has not been executed on a physical Pi in this development run.
-
-Counter's releases live in `/opt/counter/releases`; calibration lives in
-`/var/lib/counter/config.json`, outside the release. The service starts with
-outputs stopped. Startup, service restarts, and updates do not restore motion.
-
-```bash
-sudo systemctl status counter
-journalctl -u counter -n 60
-```
+Simulation is a preview. For real servos, use the Pi installer above.
 
 ## Wire the board
 
-This keeps the PCA9685 control wiring from MotionModule:
+This shows every connection for the requested Pi-powered prototype. Physical
+header pin numbers are different from BCM GPIO numbers. The SVG is a connection
+map, not the physical order of pins on a particular breakout board.
+
+![Complete Pi, PCA9685 and servo wiring](core/counter/static/wiring.svg)
 
 | Pi physical pin | PCA9685 |
 | --- | --- |
@@ -62,20 +117,46 @@ This keeps the PCA9685 control wiring from MotionModule:
 | 5 · GPIO3 | SCL |
 | 7 · GPIO4 | OE (active-low output enable) |
 | 9 · GND | GND |
+| 2 · 5 V | V+ (servo power rail; prototype only, power budget unverified) |
+
+Keep **VCC at 3.3 V** and **V+ at the servo's rated supply voltage (5 V for this
+prototype)**. They are separate rails. The six Pi-to-board jumper wires above
+include the 5 V wire; the OE pull-up resistor is an additional connection from
+OE to VCC / Pi pin 1. Do not tie OE to ground: Counter controls it through pin 7.
 
 The software expects **I²C1, address 0x40, and 50 Hz**. Add an approximately
-10 kΩ pull-up from OE to **3.3 V**, so outputs stay disabled before the service
-starts. Connect digit modules left to right to channels **0, 1, …, count−1**.
+1 kΩ pull-up from OE to **3.3 V**, so outputs stay disabled before the service
+starts. A 10 kΩ pull-up is too weak against the 10 kΩ pull-down found on the
+Adafruit breakout; use the stronger pull-up and verify OE is high during boot
+on your board. See [Adafruit's OE pull-up guidance](https://forums.adafruit.com/viewtopic.php?t=218997).
+Connect digit modules left to right to channels **0, 1, …, count−1**.
 For example, `42` on two modules sends digit 4 to channel 0 and digit 2 to
 channel 1. Unconfigured channels receive no position commands.
 
+Every servo needs all three wires on its own PCA9685 channel:
+
+| Wire on each servo | PCA9685 channel connection |
+| --- | --- |
+| Signal (usually yellow, orange or white) | PWM / signal on that channel |
+| Power (usually red) | V+ / positive on that channel |
+| Ground (usually brown or black) | GND / negative on that channel |
+
+Repeat these three connections for **each** module, up to CH 15. Check the
+connector labels on your board and servo rather than relying only on colours.
+All channels share V+ and ground, while each has its own PWM signal.
+
 ### Servo power
 
-USB-C powers the Pi; VCC powers only the board's logic. The PCA9685 does not
+USB-C powers the Pi; VCC powers only the board's logic. The diagram's Pi pin 2
+to V+ wire documents the requested prototype, **not a validated power design**.
+The PCA9685 does not
 generate power for servos. Use a **separate regulated servo V+ supply** at the
 voltage required by your servo model, sized for the servos' current (including
-stall current), and connect its ground to the board/Pi ground. Do not connect
-servo V+ to the Pi's 3.3 V or 5 V header pins. Adafruit explicitly advises
+stall current), and connect its ground to the board/Pi ground. For that external
+supply arrangement, **remove the Pi pin 2 → V+ wire**, connect supply positive
+to V+ (or the terminal block +), and supply negative to GND (or the terminal
+block −). Never join an external supply's positive rail to the Pi's 5 V rail.
+Never power servo V+ from the Pi's 3.3 V rail. Adafruit explicitly advises
 against powering servos from the Pi's 5 V rail because it can brown out the Pi:
 [PCA9685 power guidance](https://learn.adafruit.com/16-channel-pwm-servo-driver?view=all).
 
@@ -86,23 +167,45 @@ power configuration**, and Counter cannot measure or limit its current.
 Sequential movement and releasing PWM reduce overlapping commanded
 movement/holding loads, but do not establish a safe power budget.
 Releasing PWM does not cut power, guarantee zero current, or hold a digit in
-place. Stop outputs is a signal stop, not a power disconnect; use a physical
+place. Stop is a signal stop, not a power disconnect; use a physical
 power disconnect where needed.
 
 ## Calibrate your digit mechanism
 
-1. In **Display → Your setup**, choose the number of modules (1–16). Save.
-2. In **Calibration**, select a display and choose **Enable servo control**
-   (**Enable preview controls** in PC simulation).
-3. Gently test/adjust a pulse to align a digit in the window. Enter that pulse
-   in its matching 0–9 row. Repeat for each digit, then save.
-4. Repeat for each display. Blank rows remain uncalibrated. Suggested input
-   placeholders are **not saved calibration**, and the app refuses to show a
-   digit with no saved position.
-5. Enable servo control and enter a number. Leading zeros fill unused places.
+Servos are numbered by their board channel, 0–15; servo 0 is the leftmost digit.
 
-Enabling control allows movement commands; it does not itself move a servo.
-**Stop outputs** disables control again. Nothing enables itself on startup.
+1. In **Calibrate → Your setup**, choose the number of digits (1–16). Save.
+2. Press **Start** in the top right (it previews only in PC simulation).
+3. Pick a servo. For each number 0–9, type a pulse in µs or press **−** / **+**
+   (10 µs each) until the number sits in its window. While the servos are on,
+   the pulse boxes are green and the servo moves as soon as you type or press;
+   **Test** moves to the pulse in the box again.
+4. Choose **Save servo N**. Unsaved rows are marked; grey pulses are
+   suggestions that are **not saved calibration** until you accept one (press
+   **Tab** in an empty box) and save, and the app refuses to show
+   a number with no saved pulse.
+5. Repeat for each servo. With identical servos, **Copy servo N to the others**
+   saves the same pulses everywhere for you to fine-tune.
+6. In **Calibrate → Try a number**, enter a number. Leading zeros fill unused
+   places. The **Display** tab shows the commanded number as a live preview.
+
+To check the whole build, press **Start**, then **Display → Test configuration**.
+Each fully calibrated servo, starting with servo 0, counts from 0 up to 9 one
+number at a time, then returns straight to 0 before the next servo begins; the
+preview follows along. (Only this test jumps back; showing a number always steps
+through the numbers in between.) Servos without all ten numbers saved are skipped and named.
+**Stop** ends the test immediately.
+
+Each servo keeps its own pulse for every number, so different servos can be set
+differently. **Settings → Servos** lists all sixteen channels with each saved
+pulse and the number each servo was last sent; its **Calibrate** button opens
+that servo for editing. The board can't detect whether a servo is plugged in,
+so the list shows which channels are in use. Settings also holds the settle and
+pause timing.
+
+**Start** allows movement commands; it does not itself move a servo. **Stop**,
+beside it in the header, turns the servos off at once. Nothing turns itself on
+at startup.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 The accepted envelope is 600–2400 µs; that is a software limit, **not a statement
@@ -158,30 +261,74 @@ the polling interval.
 
 ## Updates
 
-**System → Check for updates** compares the installed commit with this
-repository's `main` branch. Checks run in the background with a fifteen-minute
-cache; the button refreshes it. **Update now** stops outputs, asks a fixed
-root-owned helper to install `main`, and restarts Counter. This is not an
-automatic installer; updates happen only when you request them.
+In **Settings → Software updates**, choose **Main · stable releases** or
+**Testing · experimental releases**. Both channels are offered regardless of
+which one is currently installed. Check for updates, then choose **Update now**
+or **Switch to main/testing**. Testing requires acknowledging its warning.
+Switching stops outputs, installs the selected channel, and restarts Counter.
+Calibration and the Pi account password are preserved: pulses live in
+`/var/lib/counter/config.json`, outside every release, on both channels, and
+each install first copies them to `config.before-update.json`. After you confirm,
+a popup asks for the Pi password again; Counter checks it (sharing the login
+attempt limit) before anything starts and does not save it. The popup then
+closes and **Software updates** shows each installation stage and the live log.
+When the new release is running the page reloads itself; a failure leaves the
+log on screen.
 
-The installer builds/tests a new release before activating it, preserves
-calibration, and restores the previous release if the service health check
-fails. An I²C wiring failure is shown in the dashboard instead of falling back
-to simulated hardware. The narrow sudo rule allows only the Counter update
-helper with **no arguments**. It does not permit arbitrary shell commands,
-repositories, or branches from the dashboard. Keep write access to `main`
-restricted to people you trust to install code on the Pi.
+The helper started through sudo writes nothing itself, because it runs inside
+the Counter service's read-only sandbox. It hands the installation to a
+separate `counter-update` systemd service, which runs outside that sandbox.
+
+The installed release records its channel in `INSTALL_REF`. Future checks and
+updates follow that channel. Checks run in the background with a fifteen-minute
+cache; the button refreshes them. Updates run only when requested.
+
+The installer builds/tests a new release before activating it and restores the
+previous release if its health check fails. An I²C wiring failure is shown in
+the dashboard instead of falling back to simulated hardware. The root-owned
+helper accepts only `main`, `testing`, or no arguments (the installed channel,
+for compatibility). Sudo permits only those exact commands. The dashboard
+cannot supply arbitrary repositories, refs, or shell commands. Keep write
+access to release branches restricted to people you trust to install code.
 
 ```bash
 journalctl -u counter-update -n 100
 ```
 
-Use the dashboard on a **trusted local network**. It has no account login;
-anyone who can reach the Pi can operate it. Same-origin command tokens prevent
-drive-by commands from unrelated webpages, not access by another LAN user.
-Do not forward port 8080 to the public internet.
+The installed dashboard and all control/calibration/update APIs require a Pi
+password login. Login attempts are limited to five per minute across
+clients. Sessions expire after eight hours; **Sign out** stops outputs and
+clears the browser session. Counter never stores the Pi password. The session
+signing key lives beside calibration, outside installed releases. An account
+with no usable password cannot log in; set one on the Pi with `passwd`.
+
+Use the dashboard on a **trusted local network**. The default HTTP connection
+does not encrypt the Pi password in transit; password login does not add HTTPS.
+Do not forward port 80 or 8080 to the
+public internet. PC simulation (`--simulate`) remains accessible without a Pi
+password. The public `/health` endpoint exposes only the installed commit for
+installer readiness checks.
 
 ## Development checks
+
+Development changes are pushed to **`testing`** for the repository owner's
+review. The owner merges approved changes into **`main`**, which is the release
+stable branch offered by the dashboard updater. Do not push development changes directly
+to `main`.
+
+To try the review build on a Pi:
+
+```bash
+git clone --branch testing https://github.com/AloeVeraZ/Counter.git
+cd Counter
+bash install.sh
+```
+
+For an existing testing checkout, use `git pull --ff-only origin testing` and
+run `bash install.sh --branch testing` again. The dashboard can also install
+testing updates and switch back to main after those changes are merged.
+
+Run checks before pushing to `testing`:
 
 ```bash
 python -m unittest discover -s tests -v

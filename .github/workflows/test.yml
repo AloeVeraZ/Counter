@@ -3,11 +3,23 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python }}
       - run: pip install .
       - run: python -m unittest discover -s tests -v
-      - run: bash -n install.sh installer/update.sh
+      - run: bash -n install.sh installer/install.sh installer/update.sh
+      - run: node --check core/counter/static/counter.js
+  pi-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-venv python3-lgpio
+      - run: /usr/bin/python3 -m venv --system-site-packages .pi-deps
+      - run: .pi-deps/bin/python -m pip install --only-binary=lgpio '.[pi]'
+      - run: .pi-deps/bin/python -c "import lgpio, gpiozero, pam, smbus2; assert lgpio.__file__.startswith('/usr/lib/python3/dist-packages/'); print('Using OS lgpio without compiling a wheel')"
