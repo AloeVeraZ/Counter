@@ -1,11 +1,12 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
-let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', channelSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null;
+let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, previewTimer = null, draft = [], nudgeSize = 10, servoSignature = '';
+const MIN_PULSE = 600, MAX_PULSE = 2400;
 function schedulePoll(delay) { clearTimeout(pollTimer); pollTimer = setTimeout(tick,delay); }
 function pollDelay() { if (document.hidden && !state?.armed) return 15000; return state?.busy || auto ? 500 : state?.armed ? 1000 : 3000; }
 function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = !message; $('notice').classList.toggle('error', error); }
-function setAuto(value) { auto = value; nextCount = value ? Date.now() + Number($('interval').value) : null; $('auto').textContent = value ? 'Pause counting' : 'Start counting'; }
+function setAuto(value) { auto = value; nextCount = value ? Date.now() + Number($('interval').value) : null; $('auto').textContent = value ? 'Stop counting' : 'Count up'; $('auto').classList.toggle('primary', value); }
 async function api(path, data) {
   const options = data === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json', 'X-Counter-Token':token}, body:JSON.stringify(data)};
   const response = await fetch(path, options);
@@ -27,28 +28,125 @@ function view(name) {
   if(name==='system')checkUpdates().catch(error=>notice(error.message,true));
 }
 function option(value, text) { const el = document.createElement('option'); el.value = value; el.textContent = text; return el; }
+function element(tag, className, text) { const el = document.createElement(tag); if (className) el.className = className; if (text !== undefined) el.textContent = text; return el; }
 for (let n = 1; n <= 16; n++) $('count').append(option(n, `${n} ${n === 1 ? 'display' : 'displays'}`));
+// Unsaved starting points: number 0 at the minimum pulse, evenly up to the maximum for 9.
+function suggestedPulse(digit) { return Math.round(MIN_PULSE + digit * (MAX_PULSE - MIN_PULSE) / 9); }
+function clampPulse(width) { return Math.min(MAX_PULSE, Math.max(MIN_PULSE, Math.round(width))); }
+// Calibrate edits a draft of the chosen display's ten positions until Save.
+function savedPositions() { return state?.config.positions[calChannel] || []; }
+function unsavedCount() { const saved = savedPositions(); return draft.filter((width, digit) => width !== (saved[digit] ?? null)).length; }
+function refreshCalibrationStatus() {
+  const saved = savedPositions(), changes = unsavedCount();
+  document.querySelectorAll('.calibration-row').forEach(row => {
+    const digit = Number(row.dataset.digit), width = draft[digit] ?? null;
+    const status = row.querySelector('.row-status');
+    const changed = width !== (saved[digit] ?? null);
+    row.classList.toggle('changed', changed); row.classList.toggle('saved', !changed && width !== null);
+    status.textContent = changed ? 'Not saved' : width === null ? 'Not set' : 'Saved';
+  });
+  $('save-calibration').textContent = changes ? `Save display ${calChannel + 1} · ${changes} change${changes === 1 ? '' : 's'}` : `Save display ${calChannel + 1}`;
+  $('copy-calibration').textContent = `Same servos? Copy display ${calChannel + 1} to the others`;
+  $('copy-calibration').hidden = (state?.config.count || 1) < 2;
+}
+// Move to the latest − / + value once the previous move has finished, so quick taps do not pile up.
+function previewSoon(channel, width) {
+  clearTimeout(previewTimer);
+  const attempt = () => { if (!state?.armed) return; if (state.busy || requestPending) { previewTimer = setTimeout(attempt, 250); return; } command('/api/preview', {channel, pulse_us: width}).catch(() => {}); };
+  previewTimer = setTimeout(attempt, 200);
+}
+function selectDisplay(channel) {
+  if (channel === calChannel) return;
+  if (unsavedCount() && !window.confirm(`Display ${calChannel + 1} has unsaved changes. Discard them?`)) return;
+  setAuto(false); clearTimeout(previewTimer); calChannel = channel; pickerSignature = ''; calibrationRows(true); renderPicker();
+}
 function calibrationRows(force = false) {
   if (!state) return;
-  const channel = Number($('cal-channel').value);
-  const positions = state.config.positions[channel];
-  const signature = `${channel}:${JSON.stringify(positions)}`;
+  const channel = calChannel;
+  const signature = `${channel}:${JSON.stringify(savedPositions())}`;
   if (!force && signature === calibrationSignature) return;
   calibrationSignature = signature;
-  $('test-channel').textContent = `CH ${channel}`;
-  $('calibration-rows').replaceChildren();
-  for (let digit = 0; digit < 10; digit++) {
-    const row = document.createElement('div'); row.className = 'calibration-row';
-    const digitLabel = document.createElement('span'); digitLabel.className = 'digit-label'; digitLabel.textContent = digit;
-    const label = document.createElement('label');
-    const input = document.createElement('input'); input.type = 'number'; input.min = '600'; input.max = '2400'; input.step = '1'; input.dataset.digit = digit; input.setAttribute('aria-label', `Digit ${digit} pulse width`);
-    // Unsaved starting points: digit 0 at the minimum pulse, evenly up to the maximum for 9.
-    const suggested = Math.round(600 + digit * (2400 - 600) / 9);
-    input.value = positions[digit] ?? ''; input.placeholder = String(suggested);
-    const unit = document.createElement('span'); unit.textContent = 'µs'; label.append(input, unit);
-    const test = document.createElement('button'); test.className = 'test'; test.textContent = 'Test digit'; test.disabled = !state.armed || state.busy; test.addEventListener('click',run(() => { setAuto(false); const width = input.value ? Number(input.value) : suggested; return command('/api/preview',{channel,pulse_us:width},input.value ? '' : `Testing the suggested ${width} µs. It is not saved until you enter it and save.`); }));
-    row.append(digitLabel,label,test); $('calibration-rows').append(row);
+  draft = savedPositions().slice();
+  $('calibration-rows').replaceChildren(...Array.from({length:10}, (_, digit) => {
+    const row = element('div', 'calibration-row'); row.dataset.digit = digit;
+    const nudge = direction => {
+      const width = clampPulse((draft[digit] ?? suggestedPulse(digit)) + direction * nudgeSize);
+      draft[digit] = width; refreshCalibrationStatus();
+      if (state.armed) previewSoon(channel, width); else notice('Turn on the servos to see the display move.');
+    };
+    const minus = element('button', 'nudge', '−'); minus.setAttribute('aria-label', `Move number ${digit} back`); minus.addEventListener('click', () => nudge(-1));
+    const plus = element('button', 'nudge', '+'); plus.setAttribute('aria-label', `Move number ${digit} forward`); plus.addEventListener('click', () => nudge(1));
+    const test = element('button', 'test', 'Test'); test.setAttribute('aria-label', `Test number ${digit}`);
+    test.addEventListener('click', run(() => { setAuto(false); const width = draft[digit] ?? suggestedPulse(digit); return command('/api/preview', {channel, pulse_us: width}, draft[digit] === null || draft[digit] === undefined ? `Number ${digit} isn't set yet, so this tried a suggested position.` : ''); }));
+    row.append(element('span', 'digit-label', String(digit)), minus, plus, test, element('span', 'row-status'));
+    return row;
+  }));
+  refreshCalibrationStatus();
+}
+function renderPicker() {
+  if (!state) return;
+  const {count, positions} = state.config;
+  const signature = JSON.stringify([count, positions, calChannel, state.moving_channel]);
+  if (signature === pickerSignature) return;
+  pickerSignature = signature;
+  $('display-picker').replaceChildren(...Array.from({length:count}, (_, channel) => {
+    const saved = positions[channel].filter(p => p !== null).length;
+    const button = element('button', `display-chip${saved === 10 ? ' ready' : ''}${state.moving_channel === channel ? ' moving' : ''}`);
+    button.type = 'button'; button.setAttribute('aria-pressed', String(channel === calChannel));
+    button.setAttribute('aria-label', `Display ${channel + 1}, ${saved} of 10 numbers saved`);
+    button.append(element('strong', null, String(channel + 1)), element('small', null, saved === 10 ? '✓ Ready' : `${saved}/10`));
+    button.addEventListener('click', () => selectDisplay(channel));
+    return button;
+  }));
+  const saved = positions[calChannel].filter(p => p !== null).length;
+  $('picked-status').textContent = `Display ${calChannel + 1} · ${saved} of 10 saved`;
+}
+// Settings → Servos: the exact saved pulse for every number on every display.
+function renderServoTable() {
+  const {count, positions} = state.config;
+  const signature = JSON.stringify([count, positions]);
+  if (signature !== servoSignature) {
+    // Keep values someone is still typing in other rows.
+    const typed = {};
+    document.querySelectorAll('[data-servo-cell]').forEach(input => { if (input.dataset.dirty) typed[input.dataset.servoCell] = input.value; });
+    servoSignature = signature;
+    $('servo-rows').replaceChildren(...Array.from({length:count}, (_, channel) => {
+      const tr = element('tr');
+      const name = element('th'); name.scope = 'row'; name.append(element('strong', null, `Display ${channel + 1}`), element('small', null, `Channel ${channel}`));
+      const now = element('td', 'servo-now'); now.id = `servo-now-${channel}`;
+      tr.append(name, now);
+      for (let digit = 0; digit < 10; digit++) {
+        const key = `${channel}:${digit}`, input = element('input');
+        input.type = 'number'; input.min = MIN_PULSE; input.max = MAX_PULSE; input.step = '1'; input.placeholder = '—';
+        input.dataset.servoCell = key; input.setAttribute('aria-label', `Display ${channel + 1}, number ${digit}, pulse in microseconds`);
+        input.value = positions[channel][digit] ?? '';
+        if (key in typed) { input.value = typed[key]; input.dataset.dirty = '1'; tr.classList.add('changed'); }
+        input.addEventListener('input', () => { input.dataset.dirty = '1'; tr.classList.add('changed'); });
+        const cell = element('td'); cell.append(input); tr.append(cell);
+      }
+      const save = element('button', 'servo-save', 'Save'); save.type = 'button'; save.setAttribute('aria-label', `Save display ${channel + 1}`);
+      save.addEventListener('click', run(() => saveServoRow(channel)));
+      const cell = element('td'); cell.append(save); tr.append(cell);
+      return tr;
+    }));
   }
+  for (let channel = 0; channel < count; channel++) {
+    const cell = $(`servo-now-${channel}`); if (!cell) continue;
+    const digit = state.digits[channel], pulse = digit === null || digit === undefined ? null : positions[channel][Number(digit)];
+    cell.textContent = state.moving_channel === channel ? 'Moving…' : digit === null || digit === undefined ? 'Unknown' : pulse ? `${digit} · ${pulse} µs` : String(digit);
+  }
+}
+function saveServoRow(channel) {
+  const inputs = [...document.querySelectorAll(`[data-servo-cell^="${channel}:"]`)];
+  const values = inputs.map(input => input.value.trim() ? Number(input.value) : null);
+  inputs.forEach(input => { delete input.dataset.dirty; });
+  setAuto(false);
+  return command('/api/calibration', {channel, positions: values}, `Display ${channel + 1} saved. Servos are off.`);
+}
+function saveSetup(message) {
+  setAuto(false);
+  const settings = {count: Number($('count').value), settle_ms: Number($('settle').value), pause_ms: Number($('pause').value), release_after_move: true};
+  return command('/api/setup', settings, message);
 }
 function render(value) {
   if (value.instance && value.instance !== token.slice(0,12)) { window.location.reload(); return; }
@@ -56,29 +154,28 @@ function render(value) {
   const {count,settle_ms,positions} = value.config;
   const pause_ms = value.config.pause_ms ?? 500;
   const ready = positions.slice(0,count).filter(row => row.every(p => p !== null)).length;
-  $('connection').textContent = value.simulated ? 'Simulation' : value.board.connected ? 'Board connected' : 'Board offline';
+  if (calChannel >= count) { calChannel = count - 1; calibrationSignature = ''; }
+  $('connection').textContent = value.simulated ? 'Preview on this PC' : value.board.connected ? 'Board connected' : 'Board offline';
   $('connection').className = `status ${value.board.connected ? 'good' : 'bad'}`;
   $('mode').textContent = value.simulated ? 'SIMULATION · NO HARDWARE' : 'PCA9685 · 16 channels';
-  const controlName = value.simulated ? 'Preview controls' : 'Servo control';
-  $('movement').textContent = value.busy ? value.moving_channel === null ? 'Pause between digit moves' : `Moving CH ${value.moving_channel}` : `${controlName} ${value.armed ? 'enabled' : 'disabled'}`;
+  $('movement').textContent = value.busy ? value.moving_channel === null ? 'Pausing between moves' : `Moving display ${value.moving_channel + 1}` : value.armed ? 'Servos on' : 'Servos off';
   $('movement').className = `status ${value.armed ? 'good' : ''}`;
-  $('armed-label').textContent = value.armed ? 'ENABLED' : 'DISABLED';
-  // One button: enable to test, then disable again; Stop outputs remains in the header.
-  $('arm').textContent = `${value.armed ? 'Disable' : 'Enable'} ${controlName.toLowerCase()}`;
+  // One button turns the servos on to test and off again; Stop in the header always turns them off.
+  $('control-title').textContent = value.armed ? 'Servos are on' : 'Servos are off';
+  $('control-help').textContent = !value.board.connected && !value.simulated ? 'The servo board is offline. Check Settings → Servo board.'
+    : value.simulated ? 'This is a preview on this PC. No real servos move.'
+    : value.armed ? 'Displays move when you press − / +, Test, or Show. Turn off when you finish.'
+    : 'Turn them on to move the displays while you calibrate.';
+  $('arm').textContent = value.armed ? 'Turn off servos' : 'Turn on servos';
   $('arm').classList.toggle('primary', !value.armed);
-  // Also updates an already-running preview whose template was loaded before this release.
-  const controlPanel = $('arm').closest('.panel');
-  controlPanel.querySelector('h2').textContent = controlName;
-  controlPanel.querySelector('p.help').textContent = value.simulated
-    ? 'Enable to try the test and calibration controls on this PC. This preview sends no commands to real servos.'
-    : 'Enable to test. Enabling does not move a servo; choose a number or test a position to move it. Disable when you finish.';
+  $('arm').closest('.control-bar').classList.toggle('on', value.armed);
   $('arm').disabled = !value.armed && (value.busy || !value.board.connected);
   $('show-number').disabled = !value.armed || value.busy;
   document.querySelectorAll('[data-step]').forEach(button => {button.disabled = !value.armed || value.busy;});
   $('zero').disabled = !value.armed || value.busy;
   $('auto').disabled = !value.armed;
   if (!value.armed) setAuto(false);
-  $('calibrated').textContent = `${ready} / ${count} ready`;
+  $('calibrated').textContent = `${ready} of ${count}`;
   $('calibration-progress').style.width = `${100 * ready / count}%`;
   $('display-count').textContent = count; $('last-channel').textContent = count - 1;
   $('range-label').textContent = `${'0'.repeat(count)}–${'9'.repeat(count)}`;
@@ -88,85 +185,78 @@ function render(value) {
     setupSignature = signature; $('count').value = count;
     if (![...$('settle').options].some(o => Number(o.value) === settle_ms)) $('settle').append(option(settle_ms, `${settle_ms} ms`));
     $('settle').value = settle_ms;
-    if ($('pause')) {
-      if (![...$('pause').options].some(o => Number(o.value) === pause_ms)) $('pause').append(option(pause_ms,`${pause_ms} ms`));
-      $('pause').value = pause_ms;
-    }
-    if ($('release')) { $('release').checked = true; $('release').disabled = true; }
+    if (![...$('pause').options].some(o => Number(o.value) === pause_ms)) $('pause').append(option(pause_ms,`${pause_ms} ms`));
+    $('pause').value = pause_ms;
     $('number').value = value.number;
-    const selected = Math.min(Number($('cal-channel').value || 0),count-1);
-    $('cal-channel').replaceChildren(...Array.from({length:count},(_,channel) => option(channel, `CH ${channel} · Display ${channel+1}`)));
-    $('cal-channel').value = selected;
   }
   const nextDisplaySignature = `${value.number}:${value.moving_channel}`;
   if (displaySignature !== nextDisplaySignature) {
-  displaySignature = nextDisplaySignature;
-  $('digits').classList.toggle('many',count>4);
-  $('digits').replaceChildren(...[...value.number].map((digit,channel) => {
-    const module = document.createElement('div'); module.className = `digit-module${value.moving_channel === channel ? ' moving' : ''}`;
-    const window = document.createElement('div'); window.className = 'digit-window'; window.textContent = digit;
-    const label = document.createElement('div'); label.className = 'digit-channel'; label.textContent = `CH ${String(channel).padStart(2,'0')}`;
-    module.append(window,label); return module;
-  }));
-  $('digits').setAttribute('aria-label', `Requested number ${value.number}`);
-  }
-  const nextChannelSignature = JSON.stringify([count,positions,value.digits,value.moving_channel]);
-  if (channelSignature !== nextChannelSignature) {
-  channelSignature = nextChannelSignature;
-  $('channels').replaceChildren(...Array.from({length:16},(_,channel) => {
-    const active = channel<count, calibrated = positions[channel].filter(p=>p!==null).length;
-    const card = document.createElement('div'); card.className = `channel-card${!active?' inactive':''}${value.moving_channel===channel?' moving':''}`;
-    const top = document.createElement('div'); top.className = 'channel-top';
-    const ch = document.createElement('span'); ch.textContent = `CH ${String(channel).padStart(2,'0')}`;
-    const status = document.createElement('span'); status.className = `channel-state${calibrated===10?' ready':''}`; status.textContent = active ? `${calibrated}/10` : '—'; top.append(ch,status);
-    const digit = document.createElement('div'); digit.className = 'channel-number'; digit.textContent = active ? value.digits[channel] ?? '—' : '·';
-    const detail = document.createElement('small'); detail.textContent = active ? value.moving_channel === channel ? 'Moving' : 'Last commanded digit' : 'Not configured';
-    card.append(top,digit,detail);
-    if (active) {const button = document.createElement('button'); button.textContent = 'Calibrate'; button.addEventListener('click',()=>{setAuto(false); $('cal-channel').value=channel; calibrationRows(true); $('digit-positions').scrollIntoView({behavior:'smooth',block:'start'});}); card.append(button);}
-    return card;
-  }));
+    displaySignature = nextDisplaySignature;
+    $('digits').classList.toggle('many',count>4);
+    $('digits').replaceChildren(...[...value.number].map((digit,channel) => {
+      const module = element('div', `digit-module${value.moving_channel === channel ? ' moving' : ''}`);
+      module.append(element('div', 'digit-window', digit), element('div', 'digit-channel', `CH ${String(channel).padStart(2,'0')}`));
+      return module;
+    }));
+    $('digits').setAttribute('aria-label', `Number on the display: ${value.number}`);
   }
   calibrationRows();
+  renderPicker();
+  renderServoTable();
   document.querySelectorAll('.test').forEach(button=>{button.disabled=!value.armed || value.busy;});
-  $('jog').disabled = $('jog-minus').disabled = $('jog-plus').disabled = !value.armed || value.busy;
-  $('save-calibration').disabled = value.busy;
-  $('board-connected').textContent = value.simulated ? 'SIMULATED' : value.board.connected ? 'CONNECTED' : 'OFFLINE';
+  $('save-calibration').disabled = $('copy-calibration').disabled = value.busy;
+  $('board-connected').textContent = value.simulated ? 'PREVIEW' : value.board.connected ? 'CONNECTED' : 'OFFLINE';
+  $('board-connected').className = `pill ${value.board.connected ? 'good' : 'bad'}`;
+  $('board-summary').textContent = value.simulated ? 'Running as a preview on this PC. No servo board is used.'
+    : value.board.connected ? 'The servo board is connected and ready.'
+    : 'Counter can’t reach the servo board. Check the wiring guide below, then restart Counter.';
   $('board-detail').textContent = value.board.message;
   if (value.error) notice(value.error,true);
 }
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>view(button.dataset.view)));
-$('cal-channel').addEventListener('change',()=>calibrationRows(true));
-$('arm').addEventListener('click',run(()=>{if(!state?.armed)return command('/api/arm',{});setAuto(false);return command('/api/stop',{},'Control disabled. Enable it again when you are ready to test.');}));
-$('stop').addEventListener('click',run(()=>{setAuto(false);return command('/api/stop',{},'Control disabled. Enable it again when you are ready to move a display.');}));
+document.querySelectorAll('[data-nudge]').forEach(button=>button.addEventListener('click',()=>{nudgeSize=Number(button.dataset.nudge);document.querySelectorAll('[data-nudge]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));}));
+$('arm').addEventListener('click',run(()=>{if(!state?.armed)return command('/api/arm',{},'Servos are on. Press − / + or Test to move a display.');setAuto(false);clearTimeout(previewTimer);return command('/api/stop',{},'Servos are off.');}));
+$('stop').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);return command('/api/stop',{},'Stopped. Servos are off.');}));
 if ($('logout')) $('logout').addEventListener('click',run(async()=>{setAuto(false);await command('/api/logout',{});window.location.assign('/login');}));
 $('number-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/number',{number:$('number').value.trim()}))();});
 document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/step',{delta:Number(button.dataset.step)});$('number').value=result.number;})));
 $('zero').addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/number',{number:'0'});$('number').value=result.number;}));
 $('auto').addEventListener('click',()=>setAuto(!auto));
 $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number($('interval').value);});
-$('setup-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);const settings={count:Number($('count').value),settle_ms:Number($('settle').value),release_after_move:true};if($('pause'))settings.pause_ms=Number($('pause').value);run(()=>command('/api/setup',settings,'Setup saved. Outputs are stopped.'))();});
-$('save-calibration').addEventListener('click',run(()=>{setAuto(false);return command('/api/calibration',{channel:Number($('cal-channel').value),positions:[...document.querySelectorAll('[data-digit]')].map(input=>input.value.trim()?Number(input.value):null)},'Digit positions saved. Outputs are stopped.');}));
-function jog(delta=0){setAuto(false);const width=Number($('jog-pulse').value)+delta;$('jog-pulse').value=width;return command('/api/preview',{channel:Number($('cal-channel').value),pulse_us:width});}
-$('jog').addEventListener('click',run(()=>jog()));$('jog-minus').addEventListener('click',run(()=>jog(-10)));$('jog-plus').addEventListener('click',run(()=>jog(10)));
+$('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Servos are off.'))();});
+$('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved. Servos are off.'))();});
+$('save-calibration').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Display ${channel+1} saved. Servos are off.`).then(()=>calibrationRows(true));}));
+// For identical servos: copy one display's saved positions to the others, then fine-tune any that differ.
+$('copy-calibration').addEventListener('click',run(async()=>{
+  const source=calChannel, count=state.config.count, saved=state.config.positions[source].slice();
+  if(!saved.some(width=>width!==null)){notice(`Save some positions on display ${source+1} first.`,true);return;}
+  const extra=unsavedCount()?' Unsaved changes on this display are not copied.':'';
+  if(!window.confirm(`Copy display ${source+1}'s saved positions to the other ${count-1} display${count===2?'':'s'}? Their saved positions will be replaced.${extra}`))return;
+  setAuto(false);clearTimeout(previewTimer);
+  for(let channel=0;channel<count;channel++){if(channel!==source)await command('/api/calibration',{channel,positions:saved});}
+  notice(`Copied display ${source+1} to the other displays. Check each one and fine-tune any that look off.`);
+}));
 function renderUpdates(){
   if(!updateState)return;
   const result=updateState, branch=$('update-branch').value, target=result.targets?.find(row=>row.branch===branch);
   const testing=branch==='testing', switching=branch!==(result.branch||'main');
   const installing=result.job?.state==='running';
   $('installed').textContent=result.installed||'Local source';
-  $('update-channel').textContent=(result.branch||'main').toUpperCase();
+  $('update-channel').textContent=(result.branch||'main')==='testing'?'TESTING':'STABLE';
   $('latest').textContent=target?.latest||'—';
   const installerURL=`https://raw.githubusercontent.com/AloeVeraZ/Counter/${branch}/install.sh`;
   $('download-installer').href=installerURL;
   $('download-installer').textContent=`Get ${branch} installer ↗`;
   $('install-command').textContent=`curl -fsSL ${installerURL} | bash -s -- --branch ${branch}`;
   $('testing-warning').hidden=!testing;
-  $('update').textContent=switching?`Switch to ${branch}`:'Update now';
+  $('update').textContent=switching?`Switch to ${testing?'Testing':'Stable'}`:'Update now';
   $('update-branch').disabled=installing||Boolean(updateWatch);
   $('update').disabled=Boolean(updateWatch)||installing||!result.installable||!target?.available||result.checking||(testing&&!$('testing-ack').checked);
   $('update-log').textContent=(result.job?.log||[]).join('\n');
   $('update-log').hidden=!result.job?.log?.length;
-  $('update-detail').textContent=installing?'Installation is running. Outputs are stopped.':result.job?.state==='failed'?'The last installation failed. See the log below.':result.checking?'Checking GitHub…':target?.latest?(switching?`Install ${branch} and switch this Pi’s update channel.`:target.available?'An update is available.':`Counter is up to date on ${branch}.`):result.error||`No ${branch} release is available.`;
+  const label=testing?'Testing':'Stable';
+  $('update-detail').textContent=installing?'Updating… the servos are off.':result.job?.state==='failed'?'The last update failed. The log below shows why.':result.checking?'Checking for updates…':target?.latest?(switching?`Switch this Pi to ${label}.`:target.available?'An update is ready to install.':`Counter is up to date (${label}).`):result.error||`No ${label} release is available.`;
+  $('update-detail').classList.toggle('ready',Boolean(target?.available)&&!installing);
 }
 async function checkUpdates(refresh=false){
   updateState=await api(`/api/updates${refresh?'?refresh=1':''}`);
@@ -200,7 +290,7 @@ function watchUpdate(fromCommit){
   if(document.querySelector('[data-page="system"]').hidden)view('system');
   $('update').disabled=$('update-branch').disabled=$('check-updates').disabled=true;
   $('connection').textContent='Updating';$('connection').className='status';
-  $('update-detail').textContent='Installation is running. Outputs are stopped. This page reloads when the new version is running.';
+  $('update-detail').textContent='Updating… the servos are off. This page reloads by itself when it’s done.';
   showUpdateProgress('running','Starting the update…',0,null);
   pollUpdate();
 }
@@ -223,7 +313,7 @@ async function pollUpdate(){
     }
     if(job.state==='failed'){
       showUpdateProgress('failed',`Update failed while ${stage}.`,null,job.log);
-      $('update-detail').textContent='Counter kept or restored the previous release. The log below shows what went wrong.';
+      $('update-detail').textContent='Counter is still on the previous version. The log below shows what went wrong.';
       if(restarted){reloadToSystem(4000);return;}
       endUpdateWatch('');return;
     }
@@ -276,7 +366,7 @@ $('testing-ack').addEventListener('change',renderUpdates);
 $('check-updates').addEventListener('click',run(()=>checkUpdates(true)));
 $('update').addEventListener('click',()=>{
   const branch=$('update-branch').value, switching=branch!==(updateState?.branch||'main');
-  if(!window.confirm(`${switching?`Install the ${branch} channel`:`Update Counter to the newest ${branch}`}? Outputs stop and Counter restarts. Your calibration and setup are kept.`))return;
+  if(!window.confirm(`${switching?`Switch to ${branch==='testing'?'Testing':'Stable'}`:'Install the update'}? The servos turn off and Counter restarts. Your setup and calibration are kept.`))return;
   if($('update-password-dialog'))openUpdatePassword();else requestUpdate('');
 });
 $('theme').addEventListener('click',()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;$('theme').setAttribute('aria-label',`Toggle ${theme==='dark'?'light':'dark'} theme`);try{localStorage.setItem('counter-theme',theme);}catch{}});
@@ -292,7 +382,7 @@ async function tick(){
       else if(nextCount===null)nextCount=Date.now()+Number($('interval').value);
       else if(Date.now()>=nextCount){nextCount=null;const response=await command('/api/step',{delta:1});$('number').value=response.number;}
     }
-  }catch(error){setAuto(false);$('connection').textContent='Disconnected';$('connection').className='status bad';$('arm').disabled=$('show-number').disabled=true;notice(error.message||'Cannot reach Counter. Counting is paused.',true);}
+  }catch(error){setAuto(false);$('connection').textContent='Disconnected';$('connection').className='status bad';$('arm').disabled=$('show-number').disabled=true;notice(error.message||'Can’t reach Counter. Counting is paused.',true);}
   finally{ticking=false;schedulePoll(pollDelay());}
 }
 tick();

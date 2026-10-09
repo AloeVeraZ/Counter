@@ -167,25 +167,32 @@ power configuration**, and Counter cannot measure or limit its current.
 Sequential movement and releasing PWM reduce overlapping commanded
 movement/holding loads, but do not establish a safe power budget.
 Releasing PWM does not cut power, guarantee zero current, or hold a digit in
-place. Stop outputs is a signal stop, not a power disconnect; use a physical
+place. Stop is a signal stop, not a power disconnect; use a physical
 power disconnect where needed.
 
 ## Calibrate your digit mechanism
 
-1. In **Calibration → Your setup**, choose the number of modules (1–16). Save.
-2. In **Calibration**, select a display and choose **Enable servo control**
-   (**Enable preview controls** in PC simulation).
-3. Gently test/adjust a pulse to align a digit in the window. Enter that pulse
-   in its matching 0–9 row. Repeat for each digit, then save.
-4. Repeat for each display. Blank rows remain uncalibrated. Suggested input
-   placeholders are **not saved calibration**, and the app refuses to show a
-   digit with no saved position.
-5. In **Calibration → Test a number**, enter a number. Leading zeros fill unused
+1. In **Calibrate → Your setup**, choose the number of displays (1–16). Save.
+2. Choose **Turn on servos** (it previews only in PC simulation).
+3. Pick a display (1 is the leftmost). For each number 0–9, press **−** or
+   **+** until it sits in its window; **Small steps** and **Big steps** set how
+   far each press moves. **Test** moves to that number's current position.
+4. Choose **Save display N**. Unsaved rows are marked; untouched numbers start
+   from a suggestion that is **not saved calibration**, and the app refuses to
+   show a number with no saved position.
+5. Repeat for each display. With identical servos, **Copy display N to the
+   others** saves the same positions everywhere for you to fine-tune.
+6. In **Calibrate → Try a number**, enter a number. Leading zeros fill unused
    places. The **Display** tab shows the commanded number as a live preview.
 
-Enabling control allows movement commands; it does not itself move a servo.
-The same button disables it again, as does **Stop outputs** in the header.
-Nothing enables itself on startup.
+**Settings → Servos** lists every display's exact pulse width (µs) for each
+number, so different servos can be set differently. Edit a value there and save
+that row for precise changes. It also shows the number and pulse each display
+was last sent, and holds the settle and pause timing.
+
+Turning on the servos allows movement commands; it does not itself move a
+servo. The same button turns them off again, as does **Stop** in the header.
+Nothing turns itself on at startup.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 The accepted envelope is 600–2400 µs; that is a software limit, **not a statement
@@ -241,7 +248,7 @@ the polling interval.
 
 ## Updates
 
-In **System → Software updates**, choose **Main · stable releases** or
+In **Settings → Software updates**, choose **Main · stable releases** or
 **Testing · experimental releases**. Both channels are offered regardless of
 which one is currently installed. Check for updates, then choose **Update now**
 or **Switch to main/testing**. Testing requires acknowledging its warning.

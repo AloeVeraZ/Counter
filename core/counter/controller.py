@@ -51,7 +51,7 @@ class Counter:
         if self.busy:
             raise ValueError("A display is moving. Wait or press Stop.")
         if not self.armed:
-            raise ValueError("Servo control is disabled. Enable servo control before moving a display.")
+            raise ValueError("The servos are off. Turn them on in Calibrate first.")
 
     def show(self, number):
         with self.lock:
@@ -76,7 +76,7 @@ class Counter:
                 for tick in ticks:
                     width = self.store.data["positions"][channel][tick]
                     if width is None:
-                        raise ValueError(f"Calibrate digit {tick} on channel {channel} first.")
+                        raise ValueError(f"Number {tick} isn't set on display {channel + 1} yet. Line it up in Calibrate first.")
                     moves.append((channel, width, str(tick)))
             self.requested = number
             self._start(moves)

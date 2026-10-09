@@ -49,7 +49,7 @@ class CounterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.counter.show("42")
         self.counter.arm()
-        with self.assertRaisesRegex(ValueError, "Calibrate digit 4 on channel 0"):
+        with self.assertRaisesRegex(ValueError, "Number 4 isn't set on display 1"):
             self.counter.show("42")
         self.assertEqual(self.board.commands, [])
         self.assertEqual(self.counter.requested, "00")
@@ -184,7 +184,7 @@ class CounterTests(unittest.TestCase):
         self.counter.requested = '42'
         self.store.data['positions'][0][2] = None
         self.counter.arm()
-        with self.assertRaisesRegex(ValueError,'Calibrate digit 2'):
+        with self.assertRaisesRegex(ValueError,"Number 2 isn't set"):
             self.counter.show('12')
         self.assertEqual(self.board.commands, [])
         self.assertEqual(self.counter.requested,'42')
@@ -343,7 +343,8 @@ class WebTests(unittest.TestCase):
 
     def test_dashboard_and_static_assets_work_offline(self):
         html=self.client.get('/').get_data(as_text=True)
-        self.assertIn('Make numbers move.',html)
+        for page in ['data-page="display"','data-page="calibration"','data-page="system"','id="servo-rows"']:
+            self.assertIn(page,html)
         for path in ['/static/counter.css','/static/counter.js','/static/fonts/inter-latin.woff2']:
             with self.client.get(path) as response:
                 self.assertEqual(response.status_code,200)

@@ -12,93 +12,156 @@
 <body>
 <header class="topbar">
   <a class="brand" href="/" aria-label="Counter home"><span class="brand-mark" aria-hidden="true">C<span>_</span></span> COUNTER <small>v{{ version }}</small></a>
-  <nav aria-label="Workspace"><button class="tab active" data-view="display" aria-current="page">Display</button><button class="tab" data-view="calibration">Calibration</button><button class="tab" data-view="system">System</button></nav>
-  <div class="tools"><span id="connection" class="status">Connecting</span><button id="theme" class="theme" aria-label="Toggle light theme">◐</button>{% if login_required %}<button id="logout">Sign out</button>{% endif %}<button class="danger" id="stop">Stop outputs</button></div>
+  <nav aria-label="Workspace"><button class="tab active" data-view="display" aria-current="page">Display</button><button class="tab" data-view="calibration">Calibrate</button><button class="tab" data-view="system">Settings</button></nav>
+  <div class="tools"><span id="connection" class="status">Connecting</span><button id="theme" class="theme" aria-label="Toggle light theme">◐</button>{% if login_required %}<button id="logout">Sign out</button>{% endif %}<button class="danger" id="stop">Stop</button></div>
 </header>
 <main>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
   <section data-page="display">
     <div class="hero"><div><p class="eyebrow">RASPBERRY PI / MECHANICAL DIGIT DISPLAY</p><h1>Make numbers move.</h1><p>The number on the mechanical display, updated live.</p></div><span class="pill" id="mode">PCA9685 · 16 channels</span></div>
     <section class="panel preview-panel"><div class="panel-head"><h2>Display preview</h2><span id="movement" class="status">Stopped</span></div><div class="preview-stage"><div id="digits" class="digits" aria-label="Requested number"></div></div><div class="preview-footer"><span><i class="blue-dot"></i> <span id="display-count">2</span> configured displays</span><span>Left to right → CH 0–<span id="last-channel">1</span></span></div><p class="caption">Shows the number currently commanded; servo positions are not measured. Numbers are set from Calibration for testing until a database source supplies them.</p></section>
   </section>
+  </section>
+
   <section data-page="calibration" hidden>
-    <div class="hero"><div><p class="eyebrow">SETUP / TESTING / ALIGNMENT</p><h1>Find every number.</h1><p>Set up the displays, line up each digit, and test numbers on the mechanism.</p></div></div>
+    <div class="page-head"><div><h1>Calibrate</h1><p>Line up every number on each display, then try it out.</p></div></div>
+    <section class="panel control-bar">
+      <div class="control-copy"><strong id="control-title">Servos are off</strong><p id="control-help">Turn them on to move the displays while you calibrate.</p></div>
+      <div class="control-ready"><span>Displays ready</span><strong id="calibrated">0 of 2</strong><div class="meter"><div id="calibration-progress"></div></div></div>
+      <button class="primary" id="arm">Turn on servos</button>
+    </section>
     <div class="workspace">
-      <div class="stack">
-        <section class="panel"><div class="panel-head"><h2>Servo control</h2><span id="armed-label" class="pill">DISABLED</span></div><div class="panel-body"><p class="help">Enable to test. This does not move a servo until you choose a number or test a position.</p><button class="primary wide" id="arm">Enable servo control</button><div class="rule"></div><div class="metric"><span>Calibration</span><strong id="calibrated">0 / 2 ready</strong></div><div class="meter"><div id="calibration-progress"></div></div></div></section>
-        <section class="panel"><div class="panel-head"><h2>Test a number</h2><span class="subtle" id="range-label">00–99</span></div><div class="panel-body"><form id="number-form" class="number-form"><label class="sr-only" for="number">Number to display</label><input id="number" inputmode="numeric" pattern="[0-9]+" autocomplete="off" value="00" aria-describedby="number-help"><button class="primary" id="show-number">Show number <span aria-hidden="true">↗</span></button></form><p class="help" id="number-help">Leading zeros fill unused places. Every display has its own digit calibration.</p><div class="step-row"><div class="button-group"><button data-step="-10">−10</button><button data-step="-1">−1</button><button data-step="1">+1</button><button data-step="10">+10</button></div><button id="zero">Show zero</button></div><div class="auto-row"><div><strong>Auto count</strong><p class="help">Advance by one after each completed movement.</p></div><label>Pause between numbers <select id="interval"><option value="1000">1 second</option><option value="3000" selected>3 seconds</option><option value="5000">5 seconds</option></select></label><button id="auto">Start counting</button></div></div></section>
-        <section class="panel" id="digit-positions"><div class="panel-head"><h2>Digit positions</h2><label>Display <select id="cal-channel" aria-label="Display to calibrate"></select></label></div><div class="panel-body"><p class="help">Pulse widths are specific to your servo and mechanism. Suggested values are unsaved starting points. Test gently; stop before a mechanical end stop.</p><p class="help">A full-turn digit wheel needs a position-controlled servo with sufficient travel. Continuous-rotation servos cannot select a digit without position feedback.</p><div id="calibration-rows" class="calibration-rows"></div><button class="primary wide" id="save-calibration">Save digit positions</button><p class="help">Saving stops outputs. Enable control again for the next test. Blank positions stay uncalibrated.</p></div></section>
-      </div>
+      <section class="panel" id="digit-positions">
+        <div class="panel-head"><h2>Line up the numbers</h2><span class="subtle" id="picked-status"></span></div>
+        <div class="panel-body">
+          <p class="step-label">1 · Choose a display</p>
+          <div id="display-picker" class="display-picker" role="group" aria-label="Display to calibrate"></div>
+          <div class="step-head"><p class="step-label">2 · Press − or + until each number sits in its window</p>
+            <div class="segmented" role="group" aria-label="Step size"><button type="button" data-nudge="10" aria-pressed="true">Small steps</button><button type="button" data-nudge="50" aria-pressed="false">Big steps</button></div></div>
+          <div id="calibration-rows" class="calibration-rows"></div>
+          <p class="step-label">3 · Save this display</p>
+          <button class="primary wide" id="save-calibration">Save display 1</button>
+          <button class="link" id="copy-calibration" type="button">Same servos? Copy display 1 to the others</button>
+          <details class="more"><summary>Tips</summary>
+            <ul class="tips">
+              <li>Each display remembers its own position for every number, so different servos can be set differently.</li>
+              <li>− and + move the display a little each time while the servos are on. Test moves it to that number's saved position.</li>
+              <li>Numbers you haven't set start from a suggested position. Nothing is saved until you press Save.</li>
+              <li>Go gently near the ends of travel, and stop if the mechanism hits its limit.</li>
+              <li>Saving turns the servos off. Turn them on again for the next display.</li>
+              <li>Exact values for every servo are in Settings → Servos.</li>
+            </ul>
+          </details>
+        </div>
+      </section>
       <aside class="stack">
-        <section class="panel"><div class="panel-head"><h2>Your setup</h2><span class="pill">01 BOARD</span></div><form class="panel-body" id="setup-form"><label class="field">Number of displays <select id="count" name="count"></select></label><p class="help">One digit module per servo, using channels 0 through 15. Only the selected channels move.</p><label class="field">Time for each servo to settle <select id="settle"><option value="250">250 ms</option><option value="500" selected>500 ms</option><option value="1000">1 second</option><option value="2000">2 seconds</option></select></label><label class="field">Pause between digit moves <select id="pause"><option value="250">250 ms</option><option value="500" selected>500 ms</option><option value="1000">1 second</option><option value="2000">2 seconds</option></select></label><p class="help">Only one servo receives PWM at a time. Its signal stops before the next digit move. The mechanism must keep its position without holding torque.</p><button class="wide" type="submit">Save setup</button></form></section>
-        <section class="panel"><div class="panel-head"><h2>Fine adjustment</h2><span id="test-channel" class="pill">CH 0</span></div><div class="panel-body"><p class="help">Move this module without changing its saved digit positions.</p><label class="field">Pulse width · microseconds <input type="number" id="jog-pulse" value="1500" min="600" max="2400" step="1"></label><div class="button-group"><button id="jog-minus">−10 µs</button><button id="jog-plus">+10 µs</button><button class="primary" id="jog">Test position</button></div><p class="help">Allowed signal range: 600–2400 µs. Your servo may need a narrower range.</p></div></section>
-        <section class="panel"><div class="panel-head"><h2>Calibration steps</h2></div><div class="panel-body instructions"><p><b>01</b> Choose the display you are aligning.</p><p><b>02</b> Enable servo control, then test a pulse width.</p><p><b>03</b> Adjust until a digit sits in its window.</p><p><b>04</b> Enter its pulse in the matching row. Repeat for 0–9 and save.</p></div></section>
+        <section class="panel">
+          <div class="panel-head"><h2>Your setup</h2></div>
+          <form class="panel-body" id="setup-form">
+            <label class="field">Number of displays <select id="count" name="count"></select></label>
+            <p class="help">Display 1 is the leftmost. Each display has its own servo.</p>
+            <button class="wide" type="submit">Save setup</button>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Try a number</h2><span class="subtle" id="range-label">00–99</span></div>
+          <div class="panel-body">
+            <form id="number-form" class="number-form"><label class="sr-only" for="number">Number to show</label><input id="number" inputmode="numeric" pattern="[0-9]+" autocomplete="off" value="00"><button class="primary" id="show-number">Show</button></form>
+            <div class="button-group step-row"><button data-step="-1" aria-label="Count down by one">−1</button><button data-step="1" aria-label="Count up by one">+1</button><button id="zero">Show 0</button></div>
+            <div class="auto-row"><button id="auto">Count up</button><label>every <select id="interval"><option value="1000">1 second</option><option value="3000" selected>3 seconds</option><option value="5000">5 seconds</option></select></label></div>
+          </div>
+        </section>
       </aside>
     </div>
-    <div class="section-heading"><div><p class="eyebrow">CHANNEL OVERVIEW</p><h2>A place for every digit.</h2></div><span class="subtle">Servo connection is not detectable over I²C</span></div><div id="channels" class="channel-grid"></div>
   </section>
+
   <section data-page="system" hidden>
-    <div class="hero"><div><p class="eyebrow">BOARD / WIRING / SOFTWARE</p><h1>Behind the display.</h1><p>A Raspberry Pi and one PCA9685. Everything you need to keep Counter running.</p></div></div>
-    <div class="system-grid"><section class="panel">
-      <div class="panel-head"><h2>Servo board / wiring</h2><span id="board-connected" class="pill">Checking</span></div>
-      <div class="panel-body">
-        <p id="board-detail">Checking I²C1…</p><div class="rule"></div>
-        <figure class="wiring-figure">
-          <img src="/static/wiring.svg" alt="Complete wiring: Pi pins 1 VCC, 3 SDA, 5 SCL, 7 OE, 9 GND, 2 servo V+, plus the OE pull-up and each servo's three wires.">
-          <figcaption>Connection map, not physical board layout. <a href="/static/wiring.svg" target="_blank" rel="noopener">Open full-size diagram ↗</a></figcaption>
-        </figure>
-        <div class="wiring-table-wrap"><table>
-          <thead><tr><th>Pi physical pin</th><th>PCA9685 connection</th></tr></thead>
-          <tbody>
-            <tr><td>1 · 3.3 V</td><td>VCC · logic power</td></tr>
-            <tr><td>3 · GPIO2</td><td>SDA · I²C data</td></tr>
-            <tr><td>5 · GPIO3</td><td>SCL · I²C clock</td></tr>
-            <tr><td>7 · GPIO4 / BCM4</td><td>OE · high stops outputs</td></tr>
-            <tr><td>9 · GND</td><td>GND · common ground</td></tr>
-            <tr><td>2 · 5 V</td><td>V+ · servo power (prototype)</td></tr>
-            <tr><td>1 · 3.3 V → 1 kΩ resistor</td><td>OE · pull-up for startup</td></tr>
-          </tbody>
-        </table></div>
-        <p class="help">Keep VCC at 3.3 V. The 5 V motor wire goes to V+, never to VCC. OE stays connected to GPIO4; do not tie it to ground. USB-C powers the Pi.</p>
-        <h3>Every servo / three wires</h3>
-        <div class="wiring-table-wrap"><table>
-          <thead><tr><th>Servo wire</th><th>Its PCA9685 channel</th></tr></thead>
-          <tbody>
-            <tr><td>Signal · yellow / orange / white</td><td>PWM / signal</td></tr>
-            <tr><td>Power · red</td><td>V+ / positive · 5 V</td></tr>
-            <tr><td>Ground · brown / black</td><td>GND / negative</td></tr>
-          </tbody>
-        </table></div>
-        <p class="help">Repeat all three wires for each display. Leftmost display → CH 0, next → CH 1, through CH 15. Check connector labels; wire colours can vary.</p>
-        <div class="power-note"><strong>Pi-powered prototype: power budget unverified.</strong><p>The diagram shows Pi pin 2 → V+ for your setup. Moving one servo at a time does not guarantee enough current: a servo can still stall or brown out the Pi.</p><p>For a suitably rated external servo supply, remove the pin 2 → V+ wire, connect supply + to V+ and supply − to shared GND. Never connect external supply + to the Pi’s 5 V rail.</p></div>
-        <p class="help">Use a 1 kΩ OE pull-up to override the board’s weak pull-down; verify OE is high during boot. Stop outputs disables signals; it does not disconnect servo power.</p>
-      </div>
-    </section><section class="panel">
-      <div class="panel-head"><h2>Software updates</h2><span id="update-channel" class="pill">MAIN</span></div>
-      <div class="panel-body">
-        <p class="help">Choose which Counter releases this Pi installs. Calibration stays outside the release.</p>
-        <label class="field">Release channel <select id="update-branch"><option value="main">Main · stable releases</option><option value="testing">Testing · experimental releases</option></select></label>
-        <div id="testing-warning" class="power-note" hidden>
-          <strong>Testing can break your installation or servo behavior.</strong>
-          <p>Testing contains changes awaiting review. Keep the mechanism clear when trying it. You can switch back to main from this section.</p>
-          <label class="checkbox"><input id="testing-ack" type="checkbox">I understand the risks of installing testing.</label>
+    <div class="page-head"><div><h1>Settings</h1><p>The servo board, software updates and exact servo values.</p></div></div>
+    <div class="system-grid">
+      <section class="panel">
+        <div class="panel-head"><h2>Servo board</h2><span id="board-connected" class="pill">Checking</span></div>
+        <div class="panel-body">
+          <p id="board-summary" class="summary">Checking the servo board…</p>
+          <p id="board-detail" class="subtle"></p>
+          <div class="power-note"><strong>Give the servos their own power.</strong><p>The Pi's 5 V pin is only for a quick test with a servo or two. For more, power V+ from a separate 5 V supply and connect its − to GND.</p></div>
+          <details class="more"><summary>Wiring guide</summary>
+            <figure class="wiring-figure">
+              <img src="/static/wiring.svg" alt="Complete wiring: Pi pins 1 VCC, 3 SDA, 5 SCL, 7 OE, 9 GND, 2 servo V+, plus the OE pull-up and each servo's three wires.">
+              <figcaption>Connection map, not the physical board layout. <a href="/static/wiring.svg" target="_blank" rel="noopener">Open full size ↗</a></figcaption>
+            </figure>
+            <div class="wiring-table-wrap"><table>
+              <thead><tr><th>Pi pin</th><th>Servo board</th></tr></thead>
+              <tbody>
+                <tr><td>1 · 3.3 V</td><td>VCC · board power</td></tr>
+                <tr><td>3 · GPIO2</td><td>SDA · data</td></tr>
+                <tr><td>5 · GPIO3</td><td>SCL · clock</td></tr>
+                <tr><td>7 · GPIO4</td><td>OE · Stop switch</td></tr>
+                <tr><td>9 · GND</td><td>GND · ground</td></tr>
+                <tr><td>2 · 5 V</td><td>V+ · servo power (quick test only)</td></tr>
+                <tr><td>1 · 3.3 V → 1 kΩ resistor</td><td>OE · keeps servos off while the Pi starts</td></tr>
+              </tbody>
+            </table></div>
+            <p class="help">Keep VCC at 3.3 V; 5 V goes to V+, never to VCC. Leave OE connected to pin 7, not to ground.</p>
+            <h3>Each servo · three wires</h3>
+            <div class="wiring-table-wrap"><table>
+              <thead><tr><th>Servo wire</th><th>Its channel on the board</th></tr></thead>
+              <tbody>
+                <tr><td>Signal · yellow / orange / white</td><td>PWM / signal</td></tr>
+                <tr><td>Power · red</td><td>V+ / positive</td></tr>
+                <tr><td>Ground · brown / black</td><td>GND / negative</td></tr>
+              </tbody>
+            </table></div>
+            <p class="help">Display 1 (leftmost) plugs into channel 0, display 2 into channel 1, and so on up to channel 15. Wire colours vary, so check the labels.</p>
+            <p class="help">Moving one servo at a time does not guarantee enough current: a servo can still stall or brown out the Pi. With a separate supply, remove the pin 2 → V+ wire and never join the supply's + to the Pi's 5 V. Stop turns the servo signals off; it does not cut servo power.</p>
+          </details>
         </div>
-        <div class="metric"><span>Version</span><strong>v{{ version }}</strong></div>
-        <div class="metric"><span>Installed commit</span><code id="installed">—</code></div>
-        <div class="metric"><span>Selected channel commit</span><code id="latest">—</code></div>
-        <p id="update-detail" class="help">Choose Check for updates.</p>
-        <div class="button-group"><button id="check-updates">Check for updates</button><button class="primary" id="update" disabled>Update now</button></div>
-        <div id="update-progress-block" class="update-progress" hidden><p class="update-stage" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span id="update-stage">Starting the update…</span><span id="update-percent" class="subtle"></span></p><div class="meter"><div id="update-progress"></div></div></div>
-        <pre id="update-log" class="update-log" aria-label="Installation log" hidden></pre>
-        <a id="download-installer" class="link" href="https://raw.githubusercontent.com/AloeVeraZ/Counter/main/install.sh" target="_blank" rel="noopener">Get main installer ↗</a>
-        <details class="install-command"><summary>Pi terminal install command</summary><pre id="install-command" class="update-log"></pre></details>
-        <p class="help">Updates follow the installed channel. Switching installs the selected channel and restarts Counter with outputs stopped. Your calibration and Pi password stay the same.</p>
-        <a class="link" href="https://github.com/AloeVeraZ/Counter" target="_blank" rel="noopener">Open repository ↗</a>
-        <div class="rule"></div>
-        <p class="help">To follow an installation, run <code>journalctl -u counter-update -f</code> on the Pi. If activation fails, the installer restores the previous release.</p>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Software updates</h2><span id="update-channel" class="pill">MAIN</span></div>
+        <div class="panel-body">
+          <p id="update-detail" class="summary">Choose Check for updates.</p>
+          <label class="field">Release <select id="update-branch"><option value="main">Stable</option><option value="testing">Testing (experimental)</option></select></label>
+          <div id="testing-warning" class="power-note" hidden>
+            <strong>Testing may break things.</strong>
+            <p>It has new changes that haven't been reviewed yet. Keep the mechanism clear. You can switch back to Stable here.</p>
+            <label class="checkbox"><input id="testing-ack" type="checkbox">I understand, install Testing anyway.</label>
+          </div>
+          <div class="button-group"><button id="check-updates">Check for updates</button><button class="primary" id="update" disabled>Update now</button></div>
+          <div id="update-progress-block" class="update-progress" hidden><p class="update-stage" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span id="update-stage">Starting the update…</span><span id="update-percent" class="subtle"></span></p><div class="meter"><div id="update-progress"></div></div></div>
+          <pre id="update-log" class="update-log" aria-label="Installation log" hidden></pre>
+          <p class="help">Updating keeps your setup and calibration. Counter restarts with the servos off.</p>
+          <details class="more"><summary>Advanced</summary>
+            <div class="metric"><span>Version</span><strong>v{{ version }}</strong></div>
+            <div class="metric"><span>Installed commit</span><code id="installed">—</code></div>
+            <div class="metric"><span>Latest commit</span><code id="latest">—</code></div>
+            <a id="download-installer" class="link" href="https://raw.githubusercontent.com/AloeVeraZ/Counter/main/install.sh" target="_blank" rel="noopener">Get main installer ↗</a>
+            <details class="install-command"><summary>Pi terminal install command</summary><pre id="install-command" class="update-log"></pre></details>
+            <a class="link" href="https://github.com/AloeVeraZ/Counter" target="_blank" rel="noopener">Open repository ↗</a>
+            <p class="help">To follow an installation on the Pi, run <code>journalctl -u counter-update -f</code>. If the new version doesn't start, the installer puts the previous one back.</p>
+          </details>
+        </div>
+      </section>
+    </div>
+    <section class="panel servo-panel">
+      <div class="panel-head"><h2>Servos</h2><span class="subtle">Pulse width for each number, in microseconds (µs)</span></div>
+      <div class="panel-body">
+        <p class="help">Every display stores its own pulse for each number 0–9, so different servos can use different values. Edit a value and save that row, or use Calibrate for − / + adjustment. Allowed range 600–2400 µs; your servo may need less.</p>
+        <div class="servo-table-wrap"><table class="servo-table">
+          <thead><tr><th scope="col">Display</th><th scope="col">Now</th><th scope="col">0</th><th scope="col">1</th><th scope="col">2</th><th scope="col">3</th><th scope="col">4</th><th scope="col">5</th><th scope="col">6</th><th scope="col">7</th><th scope="col">8</th><th scope="col">9</th><th scope="col"><span class="sr-only">Save</span></th></tr></thead>
+          <tbody id="servo-rows"></tbody>
+        </table></div>
+        <p class="help">“Now” is the number and pulse Counter last sent; servos don't report where they actually are. After a restart it is unknown until the display moves again, and without position feedback a move from an unknown position can't be guaranteed to be a single step.</p>
+        <form id="timing-form" class="timing-form">
+          <label class="field">Settle time for each move <select id="settle"><option value="250">250 ms</option><option value="500" selected>500 ms</option><option value="1000">1 second</option><option value="2000">2 seconds</option></select></label>
+          <label class="field">Pause between moves <select id="pause"><option value="250">250 ms</option><option value="500" selected>500 ms</option><option value="1000">1 second</option><option value="2000">2 seconds</option></select></label>
+          <button type="submit">Save timing</button>
+        </form>
+        <p class="help">Only one servo receives a PWM signal at a time, and its signal stops after each move, so the mechanism must hold its own position.</p>
       </div>
-    </section></div>
+    </section>
   </section>
+
   {% if login_required %}
   <dialog id="update-password-dialog" class="password-dialog" aria-labelledby="update-password-title" aria-describedby="update-password-lead">
     <!-- method="dialog": without the script, submitting only closes the popup and the password never reaches the address bar. -->
@@ -114,7 +177,7 @@
     </form>
   </dialog>
   {% endif %}
-  <footer><span>COUNTER <span class="subtle">/ Servo-driven decimal displays</span></span><span class="subtle">1 board · Up to 16 displays</span></footer>
+  <footer><span>COUNTER</span><span class="subtle">One servo board · up to 16 displays</span></footer>
 </main>
 </body>
 </html>
