@@ -79,7 +79,9 @@ WorkingDirectory=/opt/counter/current
 Environment=COUNTER_RELEASE=/opt/counter/current
 Environment=GPIOZERO_PIN_FACTORY=lgpio
 Environment=COUNTER_LOGIN_USER=$install_user
-ExecStart=/opt/counter/current/.venv/bin/counter --host 0.0.0.0 --port 8080 --config /var/lib/counter/config.json
+# Port 80 lets a browser open the bare Pi address; 8080 keeps older links working.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ExecStart=/opt/counter/current/.venv/bin/counter --host 0.0.0.0 --port 80 --port 8080 --config /var/lib/counter/config.json
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=10
@@ -102,7 +104,7 @@ systemctl enable counter.service
 systemctl restart counter.service
 healthy=false
 for attempt in {1..20}; do
-  if curl --fail --silent --max-time 3 http://127.0.0.1:8080/health | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("installed_commit") == sys.argv[1] else 1)' "$commit" 2>/dev/null && systemctl is-active --quiet counter.service; then healthy=true; break; fi
+  if curl --fail --silent --max-time 3 http://127.0.0.1/health | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("installed_commit") == sys.argv[1] else 1)' "$commit" 2>/dev/null && systemctl is-active --quiet counter.service; then healthy=true; break; fi
   sleep 1
 done
 if [[ $healthy != true ]]; then
@@ -117,13 +119,13 @@ if [[ $healthy != true ]]; then
   fi
   exit 1
 fi
-echo "Counter installed / $install_ref: http://$(hostname).local:8080"
+echo "Counter installed / $install_ref: http://$(hostname).local"
 for pi_address in $(hostname -I); do
   [[ $pi_address == *:* ]] && continue
-  echo "Counter IP: http://$pi_address:8080"
+  echo "Counter IP: http://$pi_address"
 done
 echo 'Outputs start stopped. Calibration is stored in /var/lib/counter/config.json.'
-echo "After boot, open the Pi's current IP address on port 8080 and enter the Pi password for $install_user."
+echo "After boot, open the Pi's current IP address in a browser and enter the Pi password for $install_user."
 if [[ -z $previous ]]; then
   echo 'Initial install succeeded. Rebooting the Pi now; reconnect after it boots.'
   systemctl reboot

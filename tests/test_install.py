@@ -66,7 +66,7 @@ journalctl() {{ echo 'service diagnostic'; }}
         self.assertTrue(exists)
         self.assertTrue(link.endswith("/releases/new"))
         self.assertIn("Initial install succeeded", result.stdout)
-        self.assertIn("http://192.168.1.112:8080", result.stdout)
+        self.assertIn("Counter IP: http://192.168.1.112\n", result.stdout)
 
     def test_successful_update_only_restarts_service(self):
         result, commands, link, exists = self.activate(existing=True, healthy=True)

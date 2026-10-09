@@ -44,7 +44,7 @@ selects a channel and downloads it when it differs from the checkout.
 
 The installer enables I²C, installs a `counter` service, and **reboots the Pi
 after the first successful install**. Wait for it to come back online, then open
-**http://PI-IP:8080** (or **http://YOUR-PI-HOSTNAME.local:8080**) and enter the
+**http://PI-IP** (or **http://YOUR-PI-HOSTNAME.local**) and enter the
 current password of the Pi account that ran `bash install.sh`. There is no
 username field or separate Counter password. Login uses this Pi's local PAM
 password check, so different Pis use their own passwords and password changes
@@ -272,7 +272,7 @@ with no usable password cannot log in; set one on the Pi with `passwd`.
 
 Use the dashboard on a **trusted local network**. The default HTTP connection
 does not encrypt the Pi password in transit; password login does not add HTTPS.
-Do not forward port 8080 to the
+Do not forward port 80 or 8080 to the
 public internet. PC simulation (`--simulate`) remains accessible without a Pi
 password. The public `/health` endpoint exposes only the installed commit for
 installer readiness checks.

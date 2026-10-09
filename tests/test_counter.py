@@ -395,4 +395,20 @@ class WebTests(unittest.TestCase):
             self.assertEqual(run.call_args.args[0][-1],'main')
 
 
+class EntryPointTests(unittest.TestCase):
+    def serve_with(self,*args):
+        from counter import __main__ as entry
+        with tempfile.TemporaryDirectory() as directory, patch('waitress.serve') as serve, patch('signal.signal'), patch('atexit.register'):
+            with patch('sys.argv',['counter','--simulate','--config',str(Path(directory)/'config.json'),*args]):
+                entry.main()
+        return serve.call_args.kwargs['listen']
+
+    def test_default_port_is_8080(self):
+        self.assertEqual(self.serve_with(),'127.0.0.1:8080')
+
+    def test_repeated_ports_listen_on_each(self):
+        # The Pi service serves port 80 for bare-IP browsing and 8080 for older links.
+        self.assertEqual(self.serve_with('--host','0.0.0.0','--port','80','--port','8080'),'0.0.0.0:80 0.0.0.0:8080')
+
+
 if __name__=='__main__': unittest.main()
