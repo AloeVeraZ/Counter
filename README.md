@@ -172,7 +172,7 @@ power disconnect where needed.
 
 ## Calibrate your digit mechanism
 
-1. In **Display → Your setup**, choose the number of modules (1–16). Save.
+1. In **Calibration → Your setup**, choose the number of modules (1–16). Save.
 2. In **Calibration**, select a display and choose **Enable servo control**
    (**Enable preview controls** in PC simulation).
 3. Gently test/adjust a pulse to align a digit in the window. Enter that pulse
@@ -180,10 +180,12 @@ power disconnect where needed.
 4. Repeat for each display. Blank rows remain uncalibrated. Suggested input
    placeholders are **not saved calibration**, and the app refuses to show a
    digit with no saved position.
-5. Enable servo control and enter a number. Leading zeros fill unused places.
+5. In **Calibration → Test a number**, enter a number. Leading zeros fill unused
+   places. The **Display** tab shows the commanded number as a live preview.
 
 Enabling control allows movement commands; it does not itself move a servo.
-**Stop outputs** disables control again. Nothing enables itself on startup.
+The same button disables it again, as does **Stop outputs** in the header.
+Nothing enables itself on startup.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 The accepted envelope is 600–2400 µs; that is a software limit, **not a statement

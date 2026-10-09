@@ -61,15 +61,16 @@ function render(value) {
   $('movement').textContent = value.busy ? value.moving_channel === null ? 'Pause between digit moves' : `Moving CH ${value.moving_channel}` : `${controlName} ${value.armed ? 'enabled' : 'disabled'}`;
   $('movement').className = `status ${value.armed ? 'good' : ''}`;
   $('armed-label').textContent = value.armed ? 'ENABLED' : 'DISABLED';
-  const enableLabel = value.armed ? `${controlName} enabled` : `Enable ${controlName.toLowerCase()}`;
-  $('arm').textContent = $('cal-arm').textContent = enableLabel;
+  // One button: enable to test, then disable again; Stop outputs remains in the header.
+  $('arm').textContent = `${value.armed ? 'Disable' : 'Enable'} ${controlName.toLowerCase()}`;
+  $('arm').classList.toggle('primary', !value.armed);
   // Also updates an already-running preview whose template was loaded before this release.
   const controlPanel = $('arm').closest('.panel');
   controlPanel.querySelector('h2').textContent = controlName;
   controlPanel.querySelector('p.help').textContent = value.simulated
-    ? 'Enable to try the display and calibration controls on this PC. This preview sends no commands to real servos.'
-    : 'Enable to allow servo movement commands. Enabling does not move a servo; choose a number or test a position to move it. Stop outputs disables control again.';
-  $('arm').disabled = $('cal-arm').disabled = value.armed || value.busy || !value.board.connected;
+    ? 'Enable to try the test and calibration controls on this PC. This preview sends no commands to real servos.'
+    : 'Enable to test. Enabling does not move a servo; choose a number or test a position to move it. Disable when you finish.';
+  $('arm').disabled = !value.armed && (value.busy || !value.board.connected);
   $('show-number').disabled = !value.armed || value.busy;
   document.querySelectorAll('[data-step]').forEach(button => {button.disabled = !value.armed || value.busy;});
   $('zero').disabled = !value.armed || value.busy;
@@ -119,7 +120,7 @@ function render(value) {
     const digit = document.createElement('div'); digit.className = 'channel-number'; digit.textContent = active ? value.digits[channel] ?? '—' : '·';
     const detail = document.createElement('small'); detail.textContent = active ? value.moving_channel === channel ? 'Moving' : 'Last commanded digit' : 'Not configured';
     card.append(top,digit,detail);
-    if (active) {const button = document.createElement('button'); button.textContent = 'Calibrate'; button.addEventListener('click',()=>{setAuto(false); $('cal-channel').value=channel; calibrationRows(true); view('calibration');}); card.append(button);}
+    if (active) {const button = document.createElement('button'); button.textContent = 'Calibrate'; button.addEventListener('click',()=>{setAuto(false); $('cal-channel').value=channel; calibrationRows(true); $('digit-positions').scrollIntoView({behavior:'smooth',block:'start'});}); card.append(button);}
     return card;
   }));
   }
@@ -132,10 +133,8 @@ function render(value) {
   if (value.error) notice(value.error,true);
 }
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>view(button.dataset.view)));
-$('open-calibration').addEventListener('click',()=>view('calibration'));
 $('cal-channel').addEventListener('change',()=>calibrationRows(true));
-$('arm').addEventListener('click',run(()=>command('/api/arm',{})));
-$('cal-arm').addEventListener('click',run(()=>command('/api/arm',{})));
+$('arm').addEventListener('click',run(()=>{if(!state?.armed)return command('/api/arm',{});setAuto(false);return command('/api/stop',{},'Control disabled. Enable it again when you are ready to test.');}));
 $('stop').addEventListener('click',run(()=>{setAuto(false);return command('/api/stop',{},'Control disabled. Enable it again when you are ready to move a display.');}));
 if ($('logout')) $('logout').addEventListener('click',run(async()=>{setAuto(false);await command('/api/logout',{});window.location.assign('/login');}));
 $('number-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/number',{number:$('number').value.trim()}))();});
@@ -249,7 +248,7 @@ async function tick(){
       else if(nextCount===null)nextCount=Date.now()+Number($('interval').value);
       else if(Date.now()>=nextCount){nextCount=null;const response=await command('/api/step',{delta:1});$('number').value=response.number;}
     }
-  }catch(error){setAuto(false);$('connection').textContent='Disconnected';$('connection').className='status bad';$('arm').disabled=$('cal-arm').disabled=$('show-number').disabled=true;notice(error.message||'Cannot reach Counter. Counting is paused.',true);}
+  }catch(error){setAuto(false);$('connection').textContent='Disconnected';$('connection').className='status bad';$('arm').disabled=$('show-number').disabled=true;notice(error.message||'Cannot reach Counter. Counting is paused.',true);}
   finally{ticking=false;schedulePoll(pollDelay());}
 }
 tick();
