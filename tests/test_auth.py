@@ -55,6 +55,23 @@ class AuthWebTests(unittest.TestCase):
         with self.client.get("/static/wiring.svg") as response:
             self.assertEqual(response.status_code, 200)
 
+    def test_update_needs_the_pi_password_before_anything_starts(self):
+        started = []
+        updater = SimpleNamespace(installed="", snapshot=lambda refresh=False: {},
+                                  start=lambda branch=None, acknowledge_testing=False: started.append(branch) or "Update started")
+        client = create_app(self.counter, updater, auth=self.verifier, secret_key=b"x" * 32).test_client()
+        self.login(client=client)
+        html = client.get("/").get_data(as_text=True)
+        headers = {"X-Counter-Token": re.search(r'name="counter-token" content="([^"]+)"', html)[1]}
+        for body in [{"branch": "main"}, {"branch": "main", "password": "wrong"}]:
+            response = client.post("/api/updates", json=body, headers=headers)
+            self.assertEqual(response.status_code, 403)
+            self.assertTrue(response.json["password_required"])
+        self.assertEqual(started, [])
+        response = client.post("/api/updates", json={"branch": "main", "password": self.verifier.password}, headers=headers)
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(started, ["main"])
+
     def test_password_only_login_never_enables_motion(self):
         page = self.client.get("/login").get_data(as_text=True)
         self.assertIn('name="password" type="password"', page)

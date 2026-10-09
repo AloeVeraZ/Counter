@@ -88,6 +88,7 @@
         <div class="metric"><span>Selected channel commit</span><code id="latest">—</code></div>
         <p id="update-detail" class="help">Choose Check for updates.</p>
         <div class="button-group"><button id="check-updates">Check for updates</button><button class="primary" id="update" disabled>Update now</button></div>
+        <div id="update-progress-block" class="update-progress" hidden><p class="update-stage" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span id="update-stage">Starting the update…</span><span id="update-percent" class="subtle"></span></p><div class="meter"><div id="update-progress"></div></div></div>
         <pre id="update-log" class="update-log" aria-label="Installation log" hidden></pre>
         <a id="download-installer" class="link" href="https://raw.githubusercontent.com/AloeVeraZ/Counter/main/install.sh" target="_blank" rel="noopener">Get main installer ↗</a>
         <details class="install-command"><summary>Pi terminal install command</summary><pre id="install-command" class="update-log"></pre></details>
@@ -98,18 +99,21 @@
       </div>
     </section></div>
   </section>
-  <div id="update-overlay" class="update-overlay" role="dialog" aria-modal="true" aria-labelledby="update-title" hidden>
-    <section class="panel update-card">
-      <div class="panel-head"><h2 id="update-title">Updating Counter</h2><span id="update-percent" class="pill">0%</span></div>
+  {% if login_required %}
+  <dialog id="update-password-dialog" class="password-dialog" aria-labelledby="update-password-title" aria-describedby="update-password-lead">
+    <!-- method="dialog": without the script, submitting only closes the popup and the password never reaches the address bar. -->
+    <form id="update-password-form" method="dialog">
+      <div class="panel-head"><h2 id="update-password-title">Password required for update</h2></div>
       <div class="panel-body">
-        <p class="update-stage" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span id="update-stage">Starting the update…</span></p>
-        <div class="meter"><div id="update-progress"></div></div>
-        <p id="update-help" class="help">Outputs are stopped. Keep this page open; it reloads by itself when the new version is running.</p>
-        <pre id="update-overlay-log" class="update-log" aria-label="Installation log" hidden></pre>
-        <button id="update-close" class="wide" hidden>Close</button>
+        <p id="update-password-lead" class="help">Enter the Pi password for <strong>{{ login_user }}</strong> to install this update. It is checked once and not saved.</p>
+        <label class="field">Password <input id="update-password" type="password" name="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" required></label>
+        <p id="update-password-error" class="password-error" role="alert" hidden></p>
+        <p class="help">The dashboard uses plain HTTP, so enter this only on a network you trust.</p>
+        <div class="button-group"><button id="update-password-cancel" type="button">Cancel</button><button class="primary" id="update-password-submit" type="submit">Update now</button></div>
       </div>
-    </section>
-  </div>
+    </form>
+  </dialog>
+  {% endif %}
   <footer><span>COUNTER <span class="subtle">/ Servo-driven decimal displays</span></span><span class="subtle">1 board · Up to 16 displays</span></footer>
 </main>
 </body>

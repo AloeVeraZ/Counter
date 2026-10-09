@@ -11,7 +11,7 @@ async function api(path, data) {
   const response = await fetch(path, options);
   if (response.status === 401) { setAuto(false); window.location.assign('/login'); throw new Error('Enter your Pi password to continue.'); }
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
+  if (!response.ok) { const error = new Error(payload.error || `Request failed (${response.status}).`); error.data = payload; throw error; }
   return payload;
 }
 async function command(path, data, message = '') {
@@ -42,9 +42,11 @@ function calibrationRows(force = false) {
     const digitLabel = document.createElement('span'); digitLabel.className = 'digit-label'; digitLabel.textContent = digit;
     const label = document.createElement('label');
     const input = document.createElement('input'); input.type = 'number'; input.min = '600'; input.max = '2400'; input.step = '1'; input.dataset.digit = digit; input.setAttribute('aria-label', `Digit ${digit} pulse width`);
-    input.value = positions[digit] ?? ''; input.placeholder = String(Math.round(1000 + digit * 1000 / 9));
+    // Unsaved starting points: digit 0 at the minimum pulse, evenly up to the maximum for 9.
+    const suggested = Math.round(600 + digit * (2400 - 600) / 9);
+    input.value = positions[digit] ?? ''; input.placeholder = String(suggested);
     const unit = document.createElement('span'); unit.textContent = 'µs'; label.append(input, unit);
-    const test = document.createElement('button'); test.className = 'test'; test.textContent = 'Test digit'; test.disabled = !state.armed || state.busy; test.addEventListener('click',run(() => { if (!input.value) {notice('Enter a pulse width before testing this digit.',true); return;} setAuto(false); return command('/api/preview',{channel,pulse_us:Number(input.value)}); }));
+    const test = document.createElement('button'); test.className = 'test'; test.textContent = 'Test digit'; test.disabled = !state.armed || state.busy; test.addEventListener('click',run(() => { setAuto(false); const width = input.value ? Number(input.value) : suggested; return command('/api/preview',{channel,pulse_us:width},input.value ? '' : `Testing the suggested ${width} µs. It is not saved until you enter it and save.`); }));
     row.append(digitLabel,label,test); $('calibration-rows').append(row);
   }
 }
@@ -160,8 +162,8 @@ function renderUpdates(){
   $('install-command').textContent=`curl -fsSL ${installerURL} | bash -s -- --branch ${branch}`;
   $('testing-warning').hidden=!testing;
   $('update').textContent=switching?`Switch to ${branch}`:'Update now';
-  $('update-branch').disabled=installing;
-  $('update').disabled=installing||!result.installable||!target?.available||result.checking||(testing&&!$('testing-ack').checked);
+  $('update-branch').disabled=installing||Boolean(updateWatch);
+  $('update').disabled=Boolean(updateWatch)||installing||!result.installable||!target?.available||result.checking||(testing&&!$('testing-ack').checked);
   $('update-log').textContent=(result.job?.log||[]).join('\n');
   $('update-log').hidden=!result.job?.log?.length;
   $('update-detail').textContent=installing?'Installation is running. Outputs are stopped.':result.job?.state==='failed'?'The last installation failed. See the log below.':result.checking?'Checking GitHub…':target?.latest?(switching?`Install ${branch} and switch this Pi’s update channel.`:target.available?'An update is available.':`Counter is up to date on ${branch}.`):result.error||`No ${branch} release is available.`;
@@ -179,23 +181,27 @@ async function updateJob(){
   if(!response.ok)throw new Error(`Update status unavailable (${response.status}).`);
   return response.json();
 }
-function renderUpdateOverlay(mode,stage,progress,log){
-  $('update-overlay').classList.toggle('failed',mode==='failed');
-  $('update-overlay').classList.toggle('done',mode==='done');
-  $('update-title').textContent=mode==='failed'?'Update failed':mode==='done'?'Counter updated':'Updating Counter';
+// The log follows its newest line, like a terminal, until someone scrolls up to read it.
+let updateLogFollows=true;
+$('update-log').addEventListener('scroll',event=>{const log=event.target;updateLogFollows=log.scrollHeight-log.scrollTop-log.clientHeight<24;});
+function showUpdateProgress(mode,stage,progress,log){
+  const block=$('update-progress-block');block.hidden=false;
+  for(const name of ['failed','done','waiting'])block.classList.toggle(name,mode===name);
   $('update-stage').textContent=stage;
   if(progress!==null){$('update-progress').style.width=`${progress}%`;$('update-percent').textContent=`${progress}%`;}
-  if(log!==null){$('update-overlay-log').textContent=log.join('\n');$('update-overlay-log').hidden=!log.length;$('update-overlay-log').scrollTop=$('update-overlay-log').scrollHeight;}
+  if(log!==null){const element=$('update-log');element.textContent=log.join('\n');element.hidden=!log.length;if(updateLogFollows)element.scrollTop=element.scrollHeight;}
 }
-// Keep watching through the service restart, then reload into the new release.
+function reloadToSystem(delay){setTimeout(()=>{window.location.hash='system';window.location.reload();},delay);}
+// Follow the update on the System page through the service restart, then reload into the new release.
 function watchUpdate(fromCommit){
   if(updateWatch)return;
   updateWatch={from:fromCommit,started:Date.now(),timer:null};
-  setAuto(false);clearTimeout(pollTimer);notice('');
-  $('update-close').hidden=true;
-  $('update-help').textContent='Outputs are stopped. Keep this page open; it reloads by itself when the new version is running.';
-  renderUpdateOverlay('running','Starting the update…',0,[]);
-  $('update-overlay').hidden=false;
+  setAuto(false);clearTimeout(pollTimer);updateLogFollows=true;
+  if(document.querySelector('[data-page="system"]').hidden)view('system');
+  $('update').disabled=$('update-branch').disabled=$('check-updates').disabled=true;
+  $('connection').textContent='Updating';$('connection').className='status';
+  $('update-detail').textContent='Installation is running. Outputs are stopped. This page reloads when the new version is running.';
+  showUpdateProgress('running','Starting the update…',0,null);
   pollUpdate();
 }
 async function pollUpdate(){
@@ -204,41 +210,79 @@ async function pollUpdate(){
   try{job=await updateJob();}catch{}
   if(updateWatch!==watch)return;
   if(!job){
-    renderUpdateOverlay('running','Restarting Counter…',null,null);
+    showUpdateProgress('waiting','Waiting for Counter to restart…',null,null);
   }else{
     if(!watch.from)watch.from=job.installed_commit||'';
+    // A restarted service has a new instance token, so this page's commands would be refused.
     const restarted=job.instance!==token.slice(0,12)||Boolean(watch.from&&job.installed_commit&&job.installed_commit!==watch.from);
-    const stage=job.stage?job.stage[0].toUpperCase()+job.stage.slice(1):'Starting the update';
+    const stage=job.stage||'installing';
     if(job.state==='finished'){
-      if(restarted){renderUpdateOverlay('done','New version is running. Reloading…',100,job.log);setTimeout(()=>window.location.reload(),1200);return;}
-      closeUpdateWatch();notice('The update finished; Counter is already running this version.');return;
+      showUpdateProgress('done','Update finished. Reloading…',100,job.log);
+      if(restarted){reloadToSystem(1500);return;}
+      endUpdateWatch('The update finished; Counter is already running this version.');return;
     }
     if(job.state==='failed'){
-      renderUpdateOverlay('failed',`Failed while ${job.stage||'installing'}.`,null,job.log);
-      $('update-help').textContent='Counter kept or restored the previous release. The log below shows what went wrong.';
-      $('update-close').textContent=restarted?'Reload dashboard':'Close';
-      $('update-close').dataset.reload=restarted?'1':'';
-      $('update-close').hidden=false;return;
+      showUpdateProgress('failed',`Update failed while ${stage}.`,null,job.log);
+      $('update-detail').textContent='Counter kept or restored the previous release. The log below shows what went wrong.';
+      if(restarted){reloadToSystem(4000);return;}
+      endUpdateWatch('');return;
     }
-    renderUpdateOverlay('running',`${stage}…`,job.progress??null,job.log);
+    showUpdateProgress('running',`${stage[0].toUpperCase()}${stage.slice(1)}…`,job.progress??null,job.log);
   }
-  if(Date.now()-watch.started>30*60*1000)$('update-help').textContent='This is taking longer than usual. Check journalctl -u counter-update on the Pi.';
+  if(Date.now()-watch.started>30*60*1000)$('update-detail').textContent='This is taking longer than usual. Check journalctl -u counter-update on the Pi.';
   watch.timer=setTimeout(pollUpdate,2000);
 }
-function closeUpdateWatch(){
+function endUpdateWatch(message){
   if(updateWatch)clearTimeout(updateWatch.timer);
-  updateWatch=null;$('update-overlay').hidden=true;schedulePoll(0);
-  if(!document.querySelector('[data-page="system"]').hidden)checkUpdates().catch(error=>notice(error.message,true));
+  updateWatch=null;if(message)notice(message);schedulePoll(0);
+  checkUpdates().catch(error=>notice(error.message,true));
 }
-$('update-close').addEventListener('click',()=>{if($('update-close').dataset.reload)window.location.reload();else closeUpdateWatch();});
+// The update asks for the Pi password in a popup, checked by Counter before anything starts.
+let updateBusy=false;
+async function requestUpdate(password){
+  setAuto(false);updateBusy=true;$('update').disabled=true;
+  const from=state?.installed_commit||'';
+  try{
+    const result=await api('/api/updates',{branch:$('update-branch').value,acknowledge_testing:$('testing-ack').checked,...(password?{password}:{})});
+    closeUpdatePassword();notice(result.message||'');watchUpdate(from);
+  }catch(error){
+    if(error.data?.password_required&&$('update-password-dialog'))openUpdatePassword(error.message);
+    else{closeUpdatePassword();notice(error.message,true);}
+    renderUpdates();
+  }finally{updateBusy=false;setPasswordBusy(false);}
+}
+function setPasswordBusy(busy){
+  if(!$('update-password-dialog'))return;
+  $('update-password').disabled=$('update-password-cancel').disabled=$('update-password-submit').disabled=busy;
+  $('update-password-submit').textContent=busy?'Checking…':'Update now';
+}
+function openUpdatePassword(problem=''){
+  const dialog=$('update-password-dialog');
+  $('update-password-error').textContent=problem;$('update-password-error').hidden=!problem;
+  $('update-password').value='';setPasswordBusy(false);
+  if(!dialog.open)dialog.showModal();
+  $('update-password').focus();
+}
+function closeUpdatePassword(){const dialog=$('update-password-dialog');if(dialog?.open)dialog.close();}
+if($('update-password-dialog')){
+  $('update-password-form').addEventListener('submit',event=>{event.preventDefault();const password=$('update-password').value;if(!password||updateBusy)return;$('update-password').value='';setPasswordBusy(true);requestUpdate(password);});
+  $('update-password-cancel').addEventListener('click',closeUpdatePassword);
+  // Escape does not hide a password that is still being checked.
+  $('update-password-dialog').addEventListener('cancel',event=>{if(updateBusy)event.preventDefault();});
+  $('update-password-dialog').addEventListener('close',()=>{$('update-password').value='';});
+}
 $('update-branch').addEventListener('change',()=>{updateChannelChosen=true;$('testing-ack').checked=false;renderUpdates();});
 $('testing-ack').addEventListener('change',renderUpdates);
 $('check-updates').addEventListener('click',run(()=>checkUpdates(true)));
-$('update').addEventListener('click',run(async()=>{setAuto(false);$('update').disabled=true;const from=state?.installed_commit||'';try{await command('/api/updates',{branch:$('update-branch').value,acknowledge_testing:$('testing-ack').checked});watchUpdate(from);}catch(error){renderUpdates();throw error;}}));
+$('update').addEventListener('click',()=>{
+  const branch=$('update-branch').value, switching=branch!==(updateState?.branch||'main');
+  if(!window.confirm(`${switching?`Install the ${branch} channel`:`Update Counter to the newest ${branch}`}? Outputs stop and Counter restarts. Your calibration and setup are kept.`))return;
+  if($('update-password-dialog'))openUpdatePassword();else requestUpdate('');
+});
 $('theme').addEventListener('click',()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;$('theme').setAttribute('aria-label',`Toggle ${theme==='dark'?'light':'dark'} theme`);try{localStorage.setItem('counter-theme',theme);}catch{}});
 try{if(localStorage.getItem('counter-theme')==='light')document.documentElement.dataset.theme='light';}catch{}
 document.addEventListener('visibilitychange',()=>{if(document.hidden)setAuto(false);if(!ticking)schedulePoll(document.hidden?pollDelay():0);});
-document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!updateWatch)$('stop').click();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!updateWatch&&!$('update-password-dialog')?.open)$('stop').click();});
 async function tick(){
   if(ticking||updateWatch)return;ticking=true;
   try{
@@ -252,5 +296,6 @@ async function tick(){
   finally{ticking=false;schedulePoll(pollDelay());}
 }
 tick();
-// Resume the progress screen if an update is already running (reload or another device).
+// Reopen System after an update reload, and follow an update already running (reload or another device).
+if(window.location.hash==='#system'){view('system');history.replaceState(null,'',window.location.pathname);}
 updateJob().then(job=>{if(job.state==='running')watchUpdate(job.installed_commit||'');}).catch(()=>{});

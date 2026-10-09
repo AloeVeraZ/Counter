@@ -246,8 +246,16 @@ In **System → Software updates**, choose **Main · stable releases** or
 which one is currently installed. Check for updates, then choose **Update now**
 or **Switch to main/testing**. Testing requires acknowledging its warning.
 Switching stops outputs, installs the selected channel, and restarts Counter.
-Calibration and the Pi account password are preserved. The interface shows
-installation progress and failures.
+Calibration and the Pi account password are preserved. After you confirm,
+a popup asks for the Pi password again; Counter checks it (sharing the login
+attempt limit) before anything starts and does not save it. The popup then
+closes and **Software updates** shows each installation stage and the live log.
+When the new release is running the page reloads itself; a failure leaves the
+log on screen.
+
+The helper started through sudo writes nothing itself, because it runs inside
+the Counter service's read-only sandbox. It hands the installation to a
+separate `counter-update` systemd service, which runs outside that sandbox.
 
 The installed release records its channel in `INSTALL_REF`. Future checks and
 updates follow that channel. Checks run in the background with a fifteen-minute

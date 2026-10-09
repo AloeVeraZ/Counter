@@ -125,7 +125,8 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
 
     @app.get("/")
     def index():
-        return render_template("dashboard.html", token=token, version=__version__, login_required=auth is not None)
+        return render_template("dashboard.html", token=token, version=__version__, login_required=auth is not None,
+                               login_user=getattr(auth, "username", ""))
 
     @app.get("/api/state")
     def state():
@@ -184,7 +185,21 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
 
     @app.post("/api/updates")
     def update_now():
-        data = body(["branch", "acknowledge_testing"])
+        data = body(["branch", "acknowledge_testing", "password"])
+        if auth is not None:
+            # Confirm the Pi password again before installing, sharing the login attempt limit.
+            password = data.get("password")
+            if not password:
+                return jsonify(error="Enter the Pi password to install this update.", password_required=True), 403
+            retry_after = login_throttle.reserve()
+            if retry_after:
+                return jsonify(error="Too many attempts. Wait a minute and try again.", password_required=True), 429
+            try:
+                accepted = auth.verify(password)
+            except Exception:
+                return jsonify(error="Pi password verification is unavailable. Try again later.", password_required=True), 503
+            if not accepted:
+                return jsonify(error="That password was not accepted. Try again.", password_required=True), 403
         controller.stop()
         return jsonify(message=updater.start(data.get("branch"), acknowledge_testing=data.get("acknowledge_testing", False)))
 

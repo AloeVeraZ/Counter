@@ -205,6 +205,7 @@ exec bash "$@"
 """
             result=subprocess.run([BASH,'-c',setup,'counter-test',str(helper).replace('\\','/'),*args],text=True,capture_output=True,timeout=20)
             command=calls.read_text().splitlines() if calls.exists() else []
+            self.written=sorted(path.name for path in root.rglob('*') if path.is_file() and path.name not in {'helper.sh','calls','INSTALL_REF'})
             return result,command
 
     def test_only_main_and_testing_are_dispatched(self):
@@ -212,7 +213,14 @@ exec bash "$@"
             result,command=self.dispatch(branch)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(command[-2:],['--run',branch])
-            self.assertIn('bash',command)
+            self.assertIn('/bin/bash',command)
+
+    def test_dispatch_writes_nothing_inside_the_read_only_service_sandbox(self):
+        # The dashboard's sudo inherits Counter's ProtectSystem=strict mounts.
+        result,command=self.dispatch('testing')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(self.written,[])
+        self.assertIn('--unit=counter-update',command)
 
     def test_legacy_empty_arguments_follow_installed_channel(self):
         result,command=self.dispatch()

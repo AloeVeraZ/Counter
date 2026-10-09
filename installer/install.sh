@@ -57,9 +57,12 @@ runuser -u "$install_user" -- test -x "$release/.venv/bin/counter"
 begin 'configuring the Counter service'
 install -d -m 750 -o "$install_user" -g "$(id -gn "$install_user")" /var/lib/counter
 # Save the chosen account inside a root-owned helper, not in dashboard input.
-sed "s/@INSTALL_USER@/$install_user/g" "$release/installer/update.sh" > /usr/local/sbin/counter-update
-chmod 755 /usr/local/sbin/counter-update
-chown root:root /usr/local/sbin/counter-update
+# Replace it by rename: a running update is still reading the old file.
+helper_next=$(mktemp /usr/local/sbin/.counter-update-XXXXXX)
+sed "s/@INSTALL_USER@/$install_user/g" "$release/installer/update.sh" > "$helper_next"
+chmod 755 "$helper_next"
+chown root:root "$helper_next"
+mv -f "$helper_next" /usr/local/sbin/counter-update
 printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/counter-update "", /usr/local/sbin/counter-update main, /usr/local/sbin/counter-update testing\n' "$install_user" > /etc/sudoers.d/counter-update
 chmod 440 /etc/sudoers.d/counter-update
 visudo -cf /etc/sudoers.d/counter-update
