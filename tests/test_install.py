@@ -90,6 +90,15 @@ journalctl() {{ echo 'service diagnostic'; }}
         self.assertTrue(link.endswith("/releases/old"))
 
 
+class ServiceUnitTests(unittest.TestCase):
+    def test_lgpio_works_in_a_writable_runtime_directory(self):
+        source = (Path(__file__).parents[1] / "installer/install.sh").read_text(encoding="utf-8")
+        unit = source[source.index("<<UNIT\n"):source.index("\nUNIT\n")].splitlines()
+        # The release is read-only to the service; lgpio would fail to open the GPIO chip there.
+        self.assertIn("RuntimeDirectory=counter", unit)
+        self.assertIn("Environment=LG_WD=/run/counter", unit)
+
+
 @unittest.skipUnless(BASH and os.name == "posix", "Release permission checks need POSIX modes")
 class InstallReleasePermissionTests(unittest.TestCase):
     def test_release_directory_is_enterable_by_the_service_user(self):

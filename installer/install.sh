@@ -78,6 +78,10 @@ SupplementaryGroups=i2c gpio
 WorkingDirectory=/opt/counter/current
 Environment=COUNTER_RELEASE=/opt/counter/current
 Environment=GPIOZERO_PIN_FACTORY=lgpio
+# lgpio creates notification pipes in LG_WD (default: the read-only release).
+RuntimeDirectory=counter
+RuntimeDirectoryMode=0700
+Environment=LG_WD=/run/counter
 Environment=COUNTER_LOGIN_USER=$install_user
 # Port 80 lets a browser open the bare Pi address; 8080 keeps older links working.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
