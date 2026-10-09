@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
-let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', channelSignature = '', requestPending = 0, pollTimer = null;
+let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', channelSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false;
 function schedulePoll(delay) { clearTimeout(pollTimer); pollTimer = setTimeout(tick,delay); }
 function pollDelay() { if (document.hidden && !state?.armed) return 15000; return state?.busy || auto ? 500 : state?.armed ? 1000 : 3000; }
 function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = !message; $('notice').classList.toggle('error', error); }
@@ -24,6 +24,7 @@ function run(action) { return () => { Promise.resolve().then(action).catch(() =>
 function view(name) {
   document.querySelectorAll('[data-page]').forEach(el => {el.hidden = el.dataset.page !== name;});
   document.querySelectorAll('[data-view]').forEach(el => {const active = el.dataset.view === name; el.classList.toggle('active', active); if (active) el.setAttribute('aria-current','page'); else el.removeAttribute('aria-current');});
+  if(name==='system')checkUpdates().catch(error=>notice(error.message,true));
 }
 function option(value, text) { const el = document.createElement('option'); el.value = value; el.textContent = text; return el; }
 for (let n = 1; n <= 16; n++) $('count').append(option(n, `${n} ${n === 1 ? 'display' : 'displays'}`));
@@ -146,9 +147,36 @@ $('setup-form').addEventListener('submit',event=>{event.preventDefault();setAuto
 $('save-calibration').addEventListener('click',run(()=>{setAuto(false);return command('/api/calibration',{channel:Number($('cal-channel').value),positions:[...document.querySelectorAll('[data-digit]')].map(input=>input.value.trim()?Number(input.value):null)},'Digit positions saved. Outputs are stopped.');}));
 function jog(delta=0){setAuto(false);const width=Number($('jog-pulse').value)+delta;$('jog-pulse').value=width;return command('/api/preview',{channel:Number($('cal-channel').value),pulse_us:width});}
 $('jog').addEventListener('click',run(()=>jog()));$('jog-minus').addEventListener('click',run(()=>jog(-10)));$('jog-plus').addEventListener('click',run(()=>jog(10)));
-async function checkUpdates(refresh=false){const result=await api(`/api/updates${refresh?'?refresh=1':''}`);$('installed').textContent=result.installed||'Local source';$('latest').textContent=result.latest||'—';$('update-detail').textContent=result.error|| (result.checking?'Checking GitHub…':result.available?'An update is available.':result.latest?'Counter is up to date.':'No update information yet.');$('update').disabled=!result.installable||!result.available; if(result.checking)setTimeout(()=>checkUpdates().catch(error=>notice(error.message,true)),1500);}
+function renderUpdates(){
+  if(!updateState)return;
+  const result=updateState, branch=$('update-branch').value, target=result.targets?.find(row=>row.branch===branch);
+  const testing=branch==='testing', switching=branch!==(result.branch||'main');
+  const installing=result.job?.state==='running';
+  $('installed').textContent=result.installed||'Local source';
+  $('update-channel').textContent=(result.branch||'main').toUpperCase();
+  $('latest').textContent=target?.latest||'—';
+  const installerURL=`https://raw.githubusercontent.com/AloeVeraZ/Counter/${branch}/install.sh`;
+  $('download-installer').href=installerURL;
+  $('download-installer').textContent=`Get ${branch} installer ↗`;
+  $('install-command').textContent=`curl -fsSL ${installerURL} | bash -s -- --branch ${branch}`;
+  $('testing-warning').hidden=!testing;
+  $('update').textContent=switching?`Switch to ${branch}`:'Update now';
+  $('update-branch').disabled=installing;
+  $('update').disabled=installing||!result.installable||!target?.available||result.checking||(testing&&!$('testing-ack').checked);
+  $('update-log').textContent=(result.job?.log||[]).join('\n');
+  $('update-log').hidden=!result.job?.log?.length;
+  $('update-detail').textContent=installing?'Installation is running. Outputs are stopped.':result.job?.state==='failed'?'The last installation failed. See the log below.':result.checking?'Checking GitHub…':target?.latest?(switching?`Install ${branch} and switch this Pi’s update channel.`:target.available?'An update is available.':`Counter is up to date on ${branch}.`):result.error||`No ${branch} release is available.`;
+}
+async function checkUpdates(refresh=false){
+  updateState=await api(`/api/updates${refresh?'?refresh=1':''}`);
+  if(!updateChannelChosen)$('update-branch').value=updateState.branch||'main';
+  renderUpdates();
+  if(updateState.checking||updateState.job?.state==='running')setTimeout(()=>checkUpdates().catch(error=>notice(error.message,true)),1500);
+}
+$('update-branch').addEventListener('change',()=>{updateChannelChosen=true;$('testing-ack').checked=false;renderUpdates();});
+$('testing-ack').addEventListener('change',renderUpdates);
 $('check-updates').addEventListener('click',run(()=>checkUpdates(true)));
-$('update').addEventListener('click',run(async()=>{setAuto(false);$('update').disabled=true;await command('/api/updates',{});}));
+$('update').addEventListener('click',run(async()=>{setAuto(false);$('update').disabled=true;try{await command('/api/updates',{branch:$('update-branch').value,acknowledge_testing:$('testing-ack').checked});setTimeout(()=>checkUpdates().catch(error=>notice(error.message,true)),1000);}catch(error){renderUpdates();throw error;}}));
 $('theme').addEventListener('click',()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;$('theme').setAttribute('aria-label',`Toggle ${theme==='dark'?'light':'dark'} theme`);try{localStorage.setItem('counter-theme',theme);}catch{}});
 try{if(localStorage.getItem('counter-theme')==='light')document.documentElement.dataset.theme='light';}catch{}
 document.addEventListener('visibilitychange',()=>{if(document.hidden)setAuto(false);if(!ticking)schedulePoll(document.hidden?pollDelay():0);});

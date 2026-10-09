@@ -178,8 +178,8 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
 
     @app.post("/api/updates")
     def update_now():
-        body([])
+        data = body(["branch", "acknowledge_testing"])
         controller.stop()
-        return jsonify(message=updater.start())
+        return jsonify(message=updater.start(data.get("branch"), acknowledge_testing=data.get("acknowledge_testing", False)))
 
     return app

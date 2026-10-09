@@ -9,30 +9,38 @@ The dashboard uses dark panels, steel-blue controls, and self-hosted
 Barlow Condensed / Inter typography. The display preview resembles
 the individual windowed digit modules. It works offline after installation.
 
-## Use it on your PC
-
-Python 3.11 or newer:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\counter --simulate
-```
-
-Open **http://127.0.0.1:8080**. Simulation never touches GPIO or I²C. Its
-calibration is saved in `~/.counter/config.json`; use `--config PATH` to choose
-another file. Hardware mode never silently falls back to simulation.
-
 ## Install on Raspberry Pi OS
 
 Use 64-bit Raspberry Pi OS with Python 3.11+, your existing Wi-Fi/Ethernet
 connection, and the standard 40-pin GPIO header.
 
+From an existing checkout on your Pi, get the testing build and install it:
+
 ```bash
-git clone https://github.com/AloeVeraZ/Counter.git
-cd Counter
-bash install.sh
+git fetch origin
+git switch testing
+git pull --ff-only origin testing
+bash install.sh --branch testing
 ```
+
+For a fresh Pi, download the installer directly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AloeVeraZ/Counter/testing/install.sh | bash -s -- --branch testing
+```
+
+For the main release channel:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AloeVeraZ/Counter/main/install.sh | bash -s -- --branch main
+```
+
+**Testing is experimental and can break installation or servo behavior.**
+Both channels need this installer revision for web switching. While these
+changes are awaiting review and merge, use `testing`. From a checkout,
+`bash install.sh` uses its `main` or `testing` branch; `--branch` explicitly
+selects a channel and downloads it when it differs from the checkout.
+
 
 The installer enables I²C, installs a `counter` service, and **reboots the Pi
 after the first successful install**. Wait for it to come back online, then open
@@ -59,17 +67,40 @@ sudo systemctl status counter
 journalctl -u counter -n 60
 ```
 
-If an older installer fails building `lgpio` (particularly on Python 3.13),
-install its native build dependencies and retry from your Counter checkout:
+The installer uses Raspberry Pi OS's **`python3-lgpio`** package and a
+virtual environment with access to that system package. It uses
+`/usr/bin/python3`, so the GPIO extension matches the OS's Python version and
+pip does not have to build an `lgpio` wheel. This follows the
+[GPIO Zero virtual environment guidance](https://gpiozero.readthedocs.io/en/latest/installing.html#virtual-environment).
 
-```bash
-sudo apt update
-sudo apt install -y python3-dev swig liblgpio-dev build-essential
-bash install.sh
+If installation fails, its output names the failing stage. A service startup
+failure prints recent service logs and restores the previous active release.
+Calibration stays in `/var/lib/counter/config.json`.
+
+## PC simulation (Windows PowerShell)
+
+These commands are for **Windows PowerShell**, not the Pi’s Bash terminal.
+Python 3.11 or newer:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python -m pip install -e .
+.\.venv\Scripts\counter --simulate
 ```
 
-The installer now includes these dependencies, following the
-[GPIO Zero installation instructions](https://gpiozero.readthedocs.io/en/latest/installing.html#pip).
+Open **http://127.0.0.1:8080**. Simulation never touches GPIO or I²C. Its
+calibration is saved in `~/.counter/config.json`; use `--config PATH` to choose
+another file. Hardware mode never silently falls back to simulation.
+
+For Linux/macOS simulation (including previewing on a Pi):
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
+.venv/bin/counter --simulate
+```
+
+Simulation is a preview. For real servos, use the Pi installer above.
 
 ## Wire the board
 
@@ -208,19 +239,25 @@ the polling interval.
 
 ## Updates
 
-**System → Check for updates** compares the installed commit with this
-repository's `main` branch. Checks run in the background with a fifteen-minute
-cache; the button refreshes it. **Update now** stops outputs, asks a fixed
-root-owned helper to install `main`, and restarts Counter. This is not an
-automatic installer; updates happen only when you request them.
+In **System → Software updates**, choose **Main · stable releases** or
+**Testing · experimental releases**. Both channels are offered regardless of
+which one is currently installed. Check for updates, then choose **Update now**
+or **Switch to main/testing**. Testing requires acknowledging its warning.
+Switching stops outputs, installs the selected channel, and restarts Counter.
+Calibration and the Pi account password are preserved. The interface shows
+installation progress and failures.
 
-The installer builds/tests a new release before activating it, preserves
-calibration, and restores the previous release if the service health check
-fails. An I²C wiring failure is shown in the dashboard instead of falling back
-to simulated hardware. The narrow sudo rule allows only the Counter update
-helper with **no arguments**. It does not permit arbitrary shell commands,
-repositories, or branches from the dashboard. Keep write access to `main`
-restricted to people you trust to install code on the Pi.
+The installed release records its channel in `INSTALL_REF`. Future checks and
+updates follow that channel. Checks run in the background with a fifteen-minute
+cache; the button refreshes them. Updates run only when requested.
+
+The installer builds/tests a new release before activating it and restores the
+previous release if its health check fails. An I²C wiring failure is shown in
+the dashboard instead of falling back to simulated hardware. The root-owned
+helper accepts only `main`, `testing`, or no arguments (the installed channel,
+for compatibility). Sudo permits only those exact commands. The dashboard
+cannot supply arbitrary repositories, refs, or shell commands. Keep write
+access to release branches restricted to people you trust to install code.
 
 ```bash
 journalctl -u counter-update -n 100
@@ -244,7 +281,7 @@ installer readiness checks.
 
 Development changes are pushed to **`testing`** for the repository owner's
 review. The owner merges approved changes into **`main`**, which is the release
-branch used by the dashboard updater. Do not push development changes directly
+stable branch offered by the dashboard updater. Do not push development changes directly
 to `main`.
 
 To try the review build on a Pi:
@@ -256,8 +293,8 @@ bash install.sh
 ```
 
 For an existing testing checkout, use `git pull --ff-only origin testing` and
-run `bash install.sh` again. The dashboard's **Update now** installs `main`, so
-use the checkout's installer when testing unmerged changes.
+run `bash install.sh --branch testing` again. The dashboard can also install
+testing updates and switch back to main after those changes are merged.
 
 Run checks before pushing to `testing`:
 

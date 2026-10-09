@@ -323,7 +323,7 @@ class HardwareTests(unittest.TestCase):
 
 class FakeUpdates:
     def snapshot(self,refresh=False): return {"available":False,"checking":False}
-    def start(self): return "Update started"
+    def start(self,branch=None,*,acknowledge_testing=False): return "Update started"
 
 
 class WebTests(unittest.TestCase):
@@ -373,6 +373,26 @@ class WebTests(unittest.TestCase):
         self.counter.arm()
         self.assertEqual(self.post('/api/updates',{}).status_code,200)
         self.assertFalse(self.counter.armed)
+
+    def test_release_channel_switch_is_validated_and_stops_outputs(self):
+        from counter.updates import Updates
+        helper=Path(self.temp.name)/'update-helper'
+        helper.touch()
+        updater=Updates(Path(self.temp.name))
+        client=create_app(self.counter,updater).test_client()
+        import re
+        html=client.get('/').get_data(as_text=True)
+        headers={'X-Counter-Token':re.search(r'name="counter-token" content="([^"]+)"',html)[1]}
+        with patch('counter.updates.HELPER',helper),patch('counter.updates.subprocess.run',return_value=type('Result',(),{'returncode':0})()) as run:
+            self.assertEqual(client.post('/api/updates',json={'branch':'testing'},headers=headers).status_code,400)
+            self.assertEqual(client.post('/api/updates',json={'branch':'other','acknowledge_testing':True},headers=headers).status_code,400)
+            run.assert_not_called()
+            self.counter.arm()
+            self.assertEqual(client.post('/api/updates',json={'branch':'testing','acknowledge_testing':True},headers=headers).status_code,200)
+            self.assertFalse(self.counter.armed)
+            self.assertEqual(run.call_args.args[0][-1],'testing')
+            self.assertEqual(client.post('/api/updates',json={'branch':'main'},headers=headers).status_code,200)
+            self.assertEqual(run.call_args.args[0][-1],'main')
 
 
 if __name__=='__main__': unittest.main()

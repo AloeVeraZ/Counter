@@ -71,7 +71,30 @@
         <div class="power-note"><strong>Pi-powered prototype: power budget unverified.</strong><p>The diagram shows Pi pin 2 → V+ for your setup. Moving one servo at a time does not guarantee enough current: a servo can still stall or brown out the Pi.</p><p>For a suitably rated external servo supply, remove the pin 2 → V+ wire, connect supply + to V+ and supply − to shared GND. Never connect external supply + to the Pi’s 5 V rail.</p></div>
         <p class="help">Use a 1 kΩ OE pull-up to override the board’s weak pull-down; verify OE is high during boot. Stop outputs disables signals; it does not disconnect servo power.</p>
       </div>
-    </section><section class="panel"><div class="panel-head"><h2>Software updates</h2><span class="pill">MAIN</span></div><div class="panel-body"><p class="help">Checks AloeVeraZ/Counter on GitHub. Calibration is kept outside the installed release.</p><div class="metric"><span>Version</span><strong>v{{ version }}</strong></div><div class="metric"><span>Installed commit</span><code id="installed">—</code></div><div class="metric"><span>Latest commit</span><code id="latest">—</code></div><p id="update-detail" class="help">Choose Check for updates.</p><div class="button-group"><button id="check-updates">Check for updates</button><button class="primary" id="update" disabled>Update now</button></div><p class="help">Update now is available after installing on the Pi with install.sh. Outputs stop before the service restarts. Updates run only when requested.</p><a class="link" href="https://github.com/AloeVeraZ/Counter" target="_blank" rel="noopener">Open repository ↗</a><div class="rule"></div><p class="help">For an update failure, inspect <code>journalctl -u counter-update</code> on the Pi. The installer keeps the previous release if its health check fails.</p></div></section></div>
+    </section><section class="panel">
+      <div class="panel-head"><h2>Software updates</h2><span id="update-channel" class="pill">MAIN</span></div>
+      <div class="panel-body">
+        <p class="help">Choose which Counter releases this Pi installs. Calibration stays outside the release.</p>
+        <label class="field">Release channel <select id="update-branch"><option value="main">Main · stable releases</option><option value="testing">Testing · experimental releases</option></select></label>
+        <div id="testing-warning" class="power-note" hidden>
+          <strong>Testing can break your installation or servo behavior.</strong>
+          <p>Testing contains changes awaiting review. Keep the mechanism clear when trying it. You can switch back to main from this section.</p>
+          <label class="checkbox"><input id="testing-ack" type="checkbox">I understand the risks of installing testing.</label>
+        </div>
+        <div class="metric"><span>Version</span><strong>v{{ version }}</strong></div>
+        <div class="metric"><span>Installed commit</span><code id="installed">—</code></div>
+        <div class="metric"><span>Selected channel commit</span><code id="latest">—</code></div>
+        <p id="update-detail" class="help">Choose Check for updates.</p>
+        <div class="button-group"><button id="check-updates">Check for updates</button><button class="primary" id="update" disabled>Update now</button></div>
+        <pre id="update-log" class="update-log" aria-label="Installation log" hidden></pre>
+        <a id="download-installer" class="link" href="https://raw.githubusercontent.com/AloeVeraZ/Counter/main/install.sh" target="_blank" rel="noopener">Get main installer ↗</a>
+        <details class="install-command"><summary>Pi terminal install command</summary><pre id="install-command" class="update-log"></pre></details>
+        <p class="help">Updates follow the installed channel. Switching installs the selected channel and restarts Counter with outputs stopped. Your calibration and Pi password stay the same.</p>
+        <a class="link" href="https://github.com/AloeVeraZ/Counter" target="_blank" rel="noopener">Open repository ↗</a>
+        <div class="rule"></div>
+        <p class="help">To follow an installation, run <code>journalctl -u counter-update -f</code> on the Pi. If activation fails, the installer restores the previous release.</p>
+      </div>
+    </section></div>
   </section>
   <footer><span>COUNTER <span class="subtle">/ Servo-driven decimal displays</span></span><span class="subtle">1 board · Up to 16 displays</span></footer>
 </main>
