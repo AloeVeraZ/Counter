@@ -21,6 +21,7 @@
   <section data-page="display">
     <div class="hero"><div><p class="eyebrow">RASPBERRY PI / MECHANICAL DIGIT DISPLAY</p><h1>Make numbers move.</h1><p>The number on the mechanical display, updated live.</p></div><span class="pill" id="mode">PCA9685 · 16 channels</span></div>
     <section class="panel preview-panel"><div class="panel-head"><h2>Display preview</h2><span id="movement" class="status">Stopped</span></div><div class="preview-stage"><div id="digits" class="digits" aria-label="Requested number"></div></div><div class="preview-footer"><span><i class="blue-dot"></i> <span id="display-count">2</span> configured displays</span><span>Left to right → CH 0–<span id="last-channel">1</span></span></div><p class="caption">Shows the number currently commanded; servo positions are not measured. Numbers are set from Calibration for testing until a database source supplies them.</p></section>
+    <section class="panel test-panel"><div class="test-copy"><h2>Test configuration</h2><p class="help">Moves each servo in turn, starting with servo 0: from 0 up to 9, back down to 0, then on to the next. Press Start first. Stop ends it at any time.</p></div><button class="primary" id="test-sequence">Test configuration</button></section>
   </section>
   </section>
 

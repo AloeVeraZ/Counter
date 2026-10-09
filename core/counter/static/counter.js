@@ -1,10 +1,10 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
-let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, previewTimer = null, draft = [], servoSignature = '';
+let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, previewTimer = null, draft = [], servoSignature = '', lastShown = [];
 const MIN_PULSE = 600, MAX_PULSE = 2400, NUDGE = 10;
 function schedulePoll(delay) { clearTimeout(pollTimer); pollTimer = setTimeout(tick,delay); }
-function pollDelay() { if (document.hidden && !state?.armed) return 15000; return state?.busy || auto ? 500 : state?.armed ? 1000 : 3000; }
+function pollDelay() { if (document.hidden && !state?.armed) return 15000; return state?.busy ? 250 : auto ? 500 : state?.armed ? 1000 : 3000; }
 function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = !message; $('notice').classList.toggle('error', error); }
 function setAuto(value) { auto = value; nextCount = value ? Date.now() + Number($('interval').value) : null; $('auto').textContent = value ? 'Stop counting' : 'Count up'; $('auto').classList.toggle('primary', value); }
 async function api(path, data) {
@@ -191,11 +191,18 @@ function render(value) {
     $('pause').value = pause_ms;
     $('number').value = value.number;
   }
-  const nextDisplaySignature = `${value.number}:${value.moving_channel}`;
+  // Show each servo's last commanded number as it moves (a test walks 0–9), else the requested number.
+  const shown = [...value.number].map((digit, channel) => {
+    if (value.moving_channel === channel && value.moving_digit !== null && value.moving_digit !== undefined) lastShown[channel] = value.moving_digit;
+    else if (value.digits[channel] !== null && value.digits[channel] !== undefined) lastShown[channel] = value.digits[channel];
+    else if (value.moving_channel !== channel) lastShown[channel] = null;
+    return lastShown[channel] ?? digit;
+  });
+  const nextDisplaySignature = `${shown.join('')}:${value.moving_channel}`;
   if (displaySignature !== nextDisplaySignature) {
     displaySignature = nextDisplaySignature;
     $('digits').classList.toggle('many',count>4);
-    $('digits').replaceChildren(...[...value.number].map((digit,channel) => {
+    $('digits').replaceChildren(...shown.map((digit,channel) => {
       const module = element('div', `digit-module${value.moving_channel === channel ? ' moving' : ''}`);
       module.append(element('div', 'digit-window', digit), element('div', 'digit-channel', `CH ${String(channel).padStart(2,'0')}`));
       return module;
@@ -207,6 +214,8 @@ function render(value) {
   renderServoTable();
   document.querySelectorAll('.test').forEach(button=>{button.disabled=!value.armed || value.busy;});
   $('save-calibration').disabled = $('copy-calibration').disabled = value.busy;
+  $('test-sequence').disabled = !value.armed || value.busy;
+  $('test-sequence').textContent = value.busy && value.armed ? 'Testing…' : 'Test configuration';
   $('board-connected').textContent = value.simulated ? 'PREVIEW' : value.board.connected ? 'CONNECTED' : 'OFFLINE';
   $('board-connected').className = `pill ${value.board.connected ? 'good' : 'bad'}`;
   $('board-summary').textContent = value.simulated ? 'Running as a preview on this PC. No servo board is used.'
@@ -223,6 +232,7 @@ $('number-form').addEventListener('submit',event=>{event.preventDefault();setAut
 document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/step',{delta:Number(button.dataset.step)});$('number').value=result.number;})));
 $('zero').addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/number',{number:'0'});$('number').value=result.number;}));
 $('auto').addEventListener('click',()=>setAuto(!auto));
+$('test-sequence').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);return command('/api/test-sequence',{});}));
 $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number($('interval').value);});
 $('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Servos are off.'))();});
 $('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved. Servos are off.'))();});

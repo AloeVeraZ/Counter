@@ -54,6 +54,45 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(self.board.commands, [])
         self.assertEqual(self.counter.requested, "00")
 
+    def test_configuration_test_walks_each_servo_up_and_back_down(self):
+        self.calibrate(count=2)
+        with self.assertRaises(ValueError):
+            self.counter.test_sequence()  # servos off
+        self.counter.arm()
+        self.assertEqual(self.counter.test_sequence(), ([0, 1], []))
+        self.finish()
+        path = [0, *range(1, 10), *range(8, -1, -1)]
+        expected = [(channel, 1000 + tick * 100 + channel) for channel in (0, 1) for tick in path]
+        self.assertEqual(self.board.commands, expected)
+        self.assertEqual(self.counter.digits[:2], ["0", "0"])
+        self.assertEqual(self.board.pulses, {})  # released after every move
+
+    def test_configuration_test_steps_down_from_a_known_digit_and_skips_unset_servos(self):
+        self.calibrate(count=3)
+        data = deepcopy(self.store.data)
+        data["positions"][1][7] = None
+        self.store.save(data)
+        self.counter.digits[0] = "3"
+        self.counter.arm()
+        self.assertEqual(self.counter.test_sequence(), ([0, 2], [1]))
+        self.finish()
+        ticks = [width - 1000 for channel, width in self.board.commands if channel == 0]
+        self.assertEqual([tick // 100 for tick in ticks], [2, 1, 0, *range(1, 10), *range(8, -1, -1)])
+        self.assertNotIn(1, {channel for channel, _ in self.board.commands})
+
+    def test_configuration_test_needs_one_fully_calibrated_servo_and_stops_on_request(self):
+        self.counter.arm()
+        with self.assertRaisesRegex(ValueError, "at least one servo"):
+            self.counter.test_sequence()
+        self.calibrate(count=1)
+        self.fast_wait.stop()
+        self.counter.test_sequence()
+        self.counter.stop()
+        self.counter.worker.join(timeout=4)
+        self.assertLess(len(self.board.commands), 19)
+        self.assertFalse(self.board.enabled)
+        self.fast_wait.start()
+
     def test_decimal_digit_mapping_and_only_changed_channels(self):
         self.calibrate()
         self.counter.arm()
@@ -351,6 +390,19 @@ class WebTests(unittest.TestCase):
         state=self.client.get('/api/state').json
         self.assertTrue(state['simulated'])
         self.assertFalse(state['armed'])
+
+    def test_configuration_test_endpoint_reports_tested_and_skipped_servos(self):
+        self.assertEqual(self.post('/api/test-sequence',{}).status_code,400)  # servos off
+        data=deepcopy(self.counter.store.data)
+        data['positions'][0]=[1000+digit*100 for digit in range(10)]
+        self.counter.store.save(data)
+        self.post('/api/arm',{})
+        response=self.post('/api/test-sequence',{})
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertIn('Testing servo 0',response.json['message'])
+        self.assertIn('Skipped servo 1',response.json['message'])
+        self.counter.stop()
+        self.counter.worker.join(timeout=4)
 
     def test_commands_require_token_and_same_origin(self):
         self.assertEqual(self.client.post('/api/arm',json={}).status_code,403)

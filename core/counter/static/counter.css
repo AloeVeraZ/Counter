@@ -156,6 +156,11 @@ footer .subtle{font:12px var(--body);letter-spacing:0}
 .preview-footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px var(--pad);border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
 .caption{padding:12px var(--pad);border-top:1px solid var(--line);color:var(--faint)}
 
+.test-panel{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-top:var(--gap);padding:18px var(--pad)}
+.test-copy p.help{margin:8px 0 0}
+.test-panel button{flex:none;min-width:200px}
+body.servos-on .test-panel{border-color:var(--green-line)}
+
 /* ------------------------------------------------------------- calibrate */
 .control-bar{display:grid;grid-template-columns:minmax(0,1fr) 260px;align-items:center;gap:24px;margin-bottom:var(--gap);padding:18px var(--pad)}
 .control-copy strong{font:700 22px var(--display);text-transform:uppercase;letter-spacing:.01em}
@@ -273,6 +278,7 @@ td,th{padding:11px 8px;border-bottom:1px solid var(--line)}
   .hero p:not(.eyebrow){font-size:13px}
   .workspace,.system-grid{grid-template-columns:1fr}
   .control-bar{grid-template-columns:1fr;gap:14px}
+  .test-panel{flex-direction:column;align-items:stretch;gap:14px}
   .preview-stage{min-height:280px;padding:24px 12px}
   .digits.many{gap:8px}
   .digits.many .digit-module{width:62px}

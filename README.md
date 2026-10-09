@@ -188,6 +188,12 @@ Servos are numbered by their board channel, 0–15; servo 0 is the leftmost digi
 6. In **Calibrate → Try a number**, enter a number. Leading zeros fill unused
    places. The **Display** tab shows the commanded number as a live preview.
 
+To check the whole build, press **Start**, then **Display → Test configuration**.
+Each fully calibrated servo, starting with servo 0, steps from 0 up to 9 and
+back down to 0 one number at a time before the next servo begins; the preview
+follows along. Servos without all ten numbers saved are skipped and named.
+**Stop** ends the test immediately.
+
 Each servo keeps its own pulse for every number, so different servos can be set
 differently. **Settings → Servos** lists all sixteen channels with each saved
 pulse and the number each servo was last sent; its **Calibrate** button opens
