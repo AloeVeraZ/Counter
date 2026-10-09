@@ -171,7 +171,7 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
     def test_sequence():
         body([])
         tested, skipped = controller.test_sequence()
-        message = f"Testing servo{'s' if len(tested) > 1 else ''} {', '.join(map(str, tested))}: 0 up to 9 and back to 0."
+        message = f"Testing servo{'s' if len(tested) > 1 else ''} {', '.join(map(str, tested))}: 0 up to 9, then back to 0."
         if skipped:
             message += f" Skipped servo{'s' if len(skipped) > 1 else ''} {', '.join(map(str, skipped))} (not all ten numbers set)."
         return jsonify({**controller.snapshot(), "version": __version__, "instance": token[:12],

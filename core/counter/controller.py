@@ -91,11 +91,12 @@ class Counter:
             self.show(str(value))
 
     def test_sequence(self):
-        """Walk each fully calibrated servo, one after another, from 0 up to 9 and back down to 0.
+        """Count each fully calibrated servo, one after another, from 0 up to 9, then snap back to 0.
 
-        The whole path is planned and validated before anything moves, and every
-        step visits the neighbouring number, as a normal number change does.
-        Servos without all ten numbers saved are skipped and reported.
+        The whole path is planned and validated before anything moves. Counting up
+        visits every number; the return to 0 (and the first move to 0) is one move,
+        the owner's chosen exception to stepping through neighbours, since 0 is the
+        mechanism's starting position. Servos without all ten numbers are skipped.
         """
         with self.lock:
             self._ready()
@@ -108,10 +109,8 @@ class Counter:
             moves = []
             requested = list(self.requested.zfill(count))
             for channel in tested:
-                current = self.digits[channel]
-                # From an unknown position, 0 is the first reference; from a known one, step down to it.
-                down_to_zero = [0] if current is None else list(range(int(current) - 1, -1, -1))
-                path = down_to_zero + list(range(1, 10)) + list(range(8, -1, -1))
+                start = [] if self.digits[channel] == "0" else [0]
+                path = start + list(range(1, 10)) + [0]
                 moves += [(channel, positions[channel][tick], str(tick)) for tick in path]
                 requested[channel] = "0"
             self.requested = "".join(requested)

@@ -10,6 +10,7 @@
 - Numbers are decimal strings, including sixteen-digit values and leading zeros.
 - Keep movements interruptible and sequential. Stop must disable OE immediately.
 - From a known digit, visit each neighboring saved digit before the target. Validate the entire path before moving.
+- Exception chosen by the owner: Display → Test configuration counts each servo 0 up to 9 through every digit, then returns directly to 0.
 - Always release PWM after each move, then pause. Never keep earlier channels holding while another moves.
 - An unknown starting position cannot guarantee a one-digit physical move without feedback; document that limit.
 - Do not claim the Pi's GPIO/USB-C can power sixteen servos. Servo V+ needs a supply sized for the actual hardware.
