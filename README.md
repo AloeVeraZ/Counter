@@ -208,9 +208,13 @@ beside it in the header, turns the servos off at once. Nothing turns itself on
 at startup.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
-The accepted envelope is 600–2400 µs; that is a software limit, **not a statement
-that your servo can safely travel that far**. Use the servo's datasheet and the
-mechanism's clearance to choose a narrower actual range. Default settling time
+Pulses must stay within **Calibrate → Pulse range**, 600–2400 µs by default.
+Widen it for servos that travel further, inside a fixed 300–3000 µs envelope the
+board never exceeds. Neither is **a statement that your servo can safely travel
+that far**; use the servo's datasheet and the mechanism's clearance. The range
+can't be narrowed past a saved pulse. While it is the default, `config.json`
+keeps its earlier format, so releases without range support can still read it;
+after widening it, run only releases that include this setting. Default settling time
 is 500 ms, followed by a default 500 ms pause before the next move; adjust
 both to your mechanism. Positions are commanded without
 feedback, so the UI cannot confirm physical alignment or detect a stalled or

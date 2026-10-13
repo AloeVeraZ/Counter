@@ -2,7 +2,10 @@
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
 let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, previewTimer = null, draft = [], servoSignature = '', lastShown = [];
-const MIN_PULSE = 600, MAX_PULSE = 2400, NUDGE = 10;
+const NUDGE = 10;
+// The configured pulse range (Calibrate → Pulse range), within the board's fixed 300–3000 µs envelope.
+function pulseMin() { return state?.config.min_pulse ?? 600; }
+function pulseMax() { return state?.config.max_pulse ?? 2400; }
 function schedulePoll(delay) { clearTimeout(pollTimer); pollTimer = setTimeout(tick,delay); }
 function pollDelay() { if (document.hidden && !state?.armed) return 15000; return state?.busy ? 250 : auto ? 500 : state?.armed ? 1000 : 3000; }
 function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = !message; $('notice').classList.toggle('error', error); }
@@ -31,8 +34,8 @@ function option(value, text) { const el = document.createElement('option'); el.v
 function element(tag, className, text) { const el = document.createElement(tag); if (className) el.className = className; if (text !== undefined) el.textContent = text; return el; }
 for (let n = 1; n <= 16; n++) $('count').append(option(n, `${n} ${n === 1 ? 'display' : 'displays'}`));
 // Unsaved starting points: number 0 at the minimum pulse, evenly up to the maximum for 9.
-function suggestedPulse(digit) { return Math.round(MIN_PULSE + digit * (MAX_PULSE - MIN_PULSE) / 9); }
-function clampPulse(width) { return Math.min(MAX_PULSE, Math.max(MIN_PULSE, Math.round(width))); }
+function suggestedPulse(digit) { return Math.round(pulseMin() + digit * (pulseMax() - pulseMin()) / 9); }
+function clampPulse(width) { return Math.min(pulseMax(), Math.max(pulseMin(), Math.round(width))); }
 // Calibrate edits a draft of the chosen servo's ten pulses until Save. Servos use the board's channel numbers, 0–15.
 function savedPositions() { return state?.config.positions[calChannel] || []; }
 function unsavedCount() { const saved = savedPositions(); return draft.filter((width, digit) => width !== (saved[digit] ?? null)).length; }
@@ -63,20 +66,20 @@ function selectDisplay(channel) {
 function calibrationRows(force = false) {
   if (!state) return;
   const channel = calChannel;
-  const signature = `${channel}:${JSON.stringify(savedPositions())}`;
+  const signature = `${channel}:${pulseMin()}-${pulseMax()}:${JSON.stringify(savedPositions())}`;
   if (!force && signature === calibrationSignature) return;
   calibrationSignature = signature;
   draft = savedPositions().slice();
   $('calibration-rows').replaceChildren(...Array.from({length:10}, (_, digit) => {
     const row = element('div', 'calibration-row'); row.dataset.digit = digit;
     const suggested = suggestedPulse(digit);
-    const input = element('input'); input.type = 'number'; input.min = MIN_PULSE; input.max = MAX_PULSE; input.step = '1'; input.inputMode = 'numeric';
+    const input = element('input'); input.type = 'number'; input.min = pulseMin(); input.max = pulseMax(); input.step = '1'; input.inputMode = 'numeric';
     input.value = draft[digit] ?? ''; input.placeholder = String(suggested);
     input.setAttribute('aria-label', `Pulse for number ${digit} on servo ${channel}, in microseconds. Press Tab in an empty box to use the suggested ${suggested}.`);
     input.addEventListener('input', () => {
       const text = input.value.trim(); draft[digit] = text ? Number(text) : null; refreshCalibrationStatus();
       const width = Number(text);
-      if (state.armed && text && Number.isInteger(width) && width >= MIN_PULSE && width <= MAX_PULSE) previewSoon(channel, width, 450);
+      if (state.armed && text && Number.isInteger(width) && width >= pulseMin() && width <= pulseMax()) previewSoon(channel, width, 450);
     });
     // Tab in an empty box accepts the grey suggestion as this number's unsaved pulse.
     input.addEventListener('keydown', event => {
@@ -188,9 +191,12 @@ function render(value) {
   $('display-count').textContent = count; $('last-channel').textContent = count - 1;
   $('range-label').textContent = `${'0'.repeat(count)}–${'9'.repeat(count)}`;
   $('number').maxLength = count;
-  const signature = `${count}:${settle_ms}:${pause_ms}`;
+  const range = `${pulseMin()}–${pulseMax()} µs`;
+  $('range-summary').textContent = $('servo-range').textContent = range;
+  const signature = `${count}:${settle_ms}:${pause_ms}:${range}`;
   if (signature !== setupSignature) {
     setupSignature = signature; $('count').value = count;
+    $('min-pulse').value = pulseMin(); $('max-pulse').value = pulseMax();
     if (![...$('settle').options].some(o => Number(o.value) === settle_ms)) $('settle').append(option(settle_ms, `${settle_ms} ms`));
     $('settle').value = settle_ms;
     if (![...$('pause').options].some(o => Number(o.value) === pause_ms)) $('pause').append(option(pause_ms,`${pause_ms} ms`));
@@ -242,6 +248,7 @@ $('test-sequence').addEventListener('click',run(()=>{setAuto(false);clearTimeout
 $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number($('interval').value);});
 $('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Servos are off.'))();});
 $('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved. Servos are off.'))();});
+$('range-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);clearTimeout(previewTimer);run(()=>command('/api/setup',{min_pulse:Number($('min-pulse').value),max_pulse:Number($('max-pulse').value)},'Pulse range saved. Servos are off.').then(()=>calibrationRows(true)))();});
 $('save-calibration').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Servo ${channel} saved. Servos are off.`).then(()=>calibrationRows(true));}));
 // For identical servos: copy one servo's saved pulses to the others, then fine-tune any that differ.
 $('copy-calibration').addEventListener('click',run(async()=>{

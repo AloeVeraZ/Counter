@@ -121,6 +121,9 @@ class Counter:
         with self.lock:
             self._ready()
             integer(channel, 0, self.store.data["count"] - 1, "Channel")
+            low, high = self.store.data["min_pulse"], self.store.data["max_pulse"]
+            if type(width) is not int or not low <= width <= high:
+                raise ValueError(f"Choose a pulse from {low} to {high} µs, or widen the pulse range in Calibrate.")
             pulse(width)
             self._start([(channel, width, None)])
 
@@ -172,7 +175,7 @@ class Counter:
         with self.lock:
             if self.busy:
                 raise ValueError("Stop movement and wait before changing configuration.")
-            if not isinstance(fields, dict) or not fields or set(fields) - {"count", "settle_ms", "pause_ms", "release_after_move"}:
+            if not isinstance(fields, dict) or not fields or set(fields) - {"count", "settle_ms", "pause_ms", "release_after_move", "min_pulse", "max_pulse"}:
                 raise ValueError("Unknown or missing setup fields.")
             data = {**deepcopy(self.store.data), **fields}
             from .config import validate
@@ -189,11 +192,10 @@ class Counter:
             integer(channel, 0, self.store.data["count"] - 1, "Channel")
             if not isinstance(positions, list) or len(positions) != 10:
                 raise ValueError("Supply ten digit positions.")
-            for width in positions:
-                if width is not None:
-                    pulse(width)
             data = deepcopy(self.store.data)
             data["positions"][channel] = positions
+            from .config import validate
+            validate(data)
             self.stop()
             self.store.save(data)
             self.digits[channel] = None

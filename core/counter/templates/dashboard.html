@@ -63,6 +63,17 @@
           </form>
         </section>
         <section class="panel">
+          <div class="panel-head"><h2>Pulse range</h2><span class="subtle" id="range-summary">600–2400 µs</span></div>
+          <form class="panel-body" id="range-form">
+            <div class="range-fields">
+              <label class="field">Lowest pulse <input type="number" id="min-pulse" min="300" max="3000" step="1" inputmode="numeric" required></label>
+              <label class="field">Highest pulse <input type="number" id="max-pulse" min="300" max="3000" step="1" inputmode="numeric" required></label>
+            </div>
+            <p class="help">The lowest and highest pulse, in µs, any number can use. Widen it if your servo travels further. Check your servo's limits first: pushing past its end stop can strain it. Counter never sends below 300 or above 3000 µs.</p>
+            <button class="wide" type="submit">Save range</button>
+          </form>
+        </section>
+        <section class="panel">
           <div class="panel-head"><h2>Try a number</h2><span class="subtle" id="range-label">00–99</span></div>
           <div class="panel-body">
             <form id="number-form" class="number-form"><label class="sr-only" for="number">Number to show</label><input id="number" inputmode="numeric" pattern="[0-9]+" autocomplete="off" value="00"><button class="primary" id="show-number">Show</button></form>
@@ -144,7 +155,7 @@
     <section class="panel servo-panel">
       <div class="panel-head"><h2>Servos</h2><span class="subtle">Saved pulse for each number, in microseconds (µs)</span></div>
       <div class="panel-body">
-        <p class="help">Each servo stores its own pulse for every number 0–9. Servo numbers are the board's channels, 0–15. To change a pulse, choose Calibrate on that servo's row. Allowed range 600–2400 µs; your servo may need less.</p>
+        <p class="help">Each servo stores its own pulse for every number 0–9. Servo numbers are the board's channels, 0–15. To change a pulse, choose Calibrate on that servo's row. Pulses stay within the range set in Calibrate → Pulse range, now <span id="servo-range">600–2400 µs</span>.</p>
         <div class="servo-table-wrap"><table class="servo-table">
           <thead><tr><th scope="col">Servo</th><th scope="col">Now</th><th scope="col">0</th><th scope="col">1</th><th scope="col">2</th><th scope="col">3</th><th scope="col">4</th><th scope="col">5</th><th scope="col">6</th><th scope="col">7</th><th scope="col">8</th><th scope="col">9</th><th scope="col"><span class="sr-only">Calibrate</span></th></tr></thead>
           <tbody id="servo-rows"></tbody>

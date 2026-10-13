@@ -5,8 +5,13 @@ import os
 from pathlib import Path
 import tempfile
 
-MIN_PULSE = 600
-MAX_PULSE = 2400
+# The board never sends a pulse outside this envelope, whatever range is configured.
+LIMIT_MIN_PULSE = 300
+LIMIT_MAX_PULSE = 3000
+# The configurable pulse range starts here; widen it in Calibrate for servos that travel further.
+DEFAULT_MIN_PULSE = 600
+DEFAULT_MAX_PULSE = 2400
+RANGE_KEYS = {"min_pulse": DEFAULT_MIN_PULSE, "max_pulse": DEFAULT_MAX_PULSE}
 
 
 def integer(value, minimum, maximum, label):
@@ -15,13 +20,13 @@ def integer(value, minimum, maximum, label):
     return value
 
 
-def pulse(value):
-    return integer(value, MIN_PULSE, MAX_PULSE, "Pulse width (µs)")
+def pulse(value, minimum=LIMIT_MIN_PULSE, maximum=LIMIT_MAX_PULSE):
+    return integer(value, minimum, maximum, "Pulse width (µs)")
 
 
 def defaults():
     return {"count": 2, "settle_ms": 500, "pause_ms": 500, "release_after_move": True,
-            "positions": [[None] * 10 for _ in range(16)]}
+            **RANGE_KEYS, "positions": [[None] * 10 for _ in range(16)]}
 
 
 def validate(data):
@@ -32,15 +37,20 @@ def validate(data):
     integer(data["pause_ms"], 100, 5000, "Pause between moves (ms)")
     if data["release_after_move"] is not True:
         raise ValueError("Signals must be released between digit moves.")
+    low = integer(data["min_pulse"], LIMIT_MIN_PULSE, LIMIT_MAX_PULSE, "Minimum pulse (µs)")
+    high = integer(data["max_pulse"], LIMIT_MIN_PULSE, LIMIT_MAX_PULSE, "Maximum pulse (µs)")
+    if high - low < 100:
+        raise ValueError("The maximum pulse must be at least 100 µs above the minimum.")
     positions = data["positions"]
     if not isinstance(positions, list) or len(positions) != 16:
         raise ValueError("Exactly sixteen channel calibration tables are required.")
-    for row in positions:
+    for channel, row in enumerate(positions):
         if not isinstance(row, list) or len(row) != 10:
             raise ValueError("Each display needs ten digit positions.")
-        for value in row:
-            if value is not None:
-                pulse(value)
+        for digit, value in enumerate(row):
+            if value is not None and (type(value) is not int or not low <= value <= high):
+                raise ValueError(f"Servo {channel}, number {digit} is {value} µs, outside the pulse range "
+                                 f"{low}–{high} µs. Widen the range or change that pulse first.")
     return deepcopy(data)
 
 
@@ -54,6 +64,8 @@ class ConfigStore:
         # Preserve every calibration when upgrading the earlier configuration.
         if isinstance(data, dict):
             data.setdefault("pause_ms", 500)
+            for key, value in RANGE_KEYS.items():
+                data.setdefault(key, value)
             if data.get("release_after_move") is False:
                 data["release_after_move"] = True
         self.data = validate(data)
@@ -66,7 +78,9 @@ class ConfigStore:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
                                              delete=False, suffix=".tmp") as handle:
                 filename = handle.name
-                json.dump(candidate, handle, indent=2)
+                # Leave the default range out so releases without range support can still read the file.
+                written = {key: value for key, value in candidate.items() if RANGE_KEYS.get(key, object()) != value}
+                json.dump(written, handle, indent=2)
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())

@@ -158,7 +158,7 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
 
     @app.post("/api/setup")
     def setup():
-        controller.configure(body(["count", "settle_ms", "pause_ms", "release_after_move"]))
+        controller.configure(body(["count", "settle_ms", "pause_ms", "release_after_move", "min_pulse", "max_pulse"]))
         return state()
 
     @app.post("/api/calibration")

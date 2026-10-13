@@ -247,6 +247,38 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(active,[1]*16)
         self.assertEqual(self.board.pulses,{})
 
+    def test_pulse_range_can_widen_for_servos_that_travel_further(self):
+        self.counter.arm()
+        with self.assertRaisesRegex(ValueError, "600 to 2400"):
+            self.counter.preview(0, 2600)
+        with self.assertRaisesRegex(ValueError, "outside the pulse range"):
+            self.counter.calibrate(0, [2600] * 10)
+        self.counter.configure({'min_pulse': 500, 'max_pulse': 2700})
+        self.counter.calibrate(0, [500 + digit * 200 for digit in range(10)])
+        self.assertEqual(ConfigStore(self.store.path).data['positions'][0][9], 2300)
+        self.counter.arm()
+        self.counter.preview(0, 2700)
+        self.finish()
+        self.assertEqual(self.board.commands[-1], (0, 2700))
+
+    def test_pulse_range_keeps_the_hardware_envelope_and_saved_pulses(self):
+        for low, high in [(299, 2400), (600, 3001), (1500, 1550), (2000, 1000)]:
+            with self.subTest(low=low, high=high), self.assertRaises(ValueError):
+                self.counter.configure({'min_pulse': low, 'max_pulse': high})
+        self.counter.calibrate(0, [2400] + [None] * 9)
+        # Narrowing past a saved pulse is refused and names that pulse.
+        with self.assertRaisesRegex(ValueError, "Servo 0, number 0 is 2400"):
+            self.counter.configure({'max_pulse': 2300})
+        self.assertEqual(self.store.data['max_pulse'], 2400)
+
+    def test_default_pulse_range_leaves_the_saved_file_readable_by_older_releases(self):
+        self.counter.calibrate(0, [1500] * 10)
+        self.assertNotIn('min_pulse', json.loads(self.store.path.read_text()))
+        self.counter.configure({'max_pulse': 2600})
+        saved = json.loads(self.store.path.read_text())
+        self.assertEqual((saved.get('min_pulse'), saved['max_pulse']), (None, 2600))
+        self.assertEqual(ConfigStore(self.store.path).data['min_pulse'], 600)
+
     def test_old_config_preserves_calibration_and_disables_hold_mode(self):
         data = defaults()
         del data['pause_ms']
@@ -354,7 +386,7 @@ class HardwareTests(unittest.TestCase):
 
     def test_signal_bounds_reject_nan_boolean_and_invalid_channel(self):
         self.board.enable()
-        for width in [599,2401,float('nan'),float('inf'),True,"1500",1500.5]:
+        for width in [299,3001,float('nan'),float('inf'),True,"1500",1500.5]:
             with self.subTest(width=width),self.assertRaises(ValueError): self.board.write(0,width)
         for channel in [-1,16,True]:
             with self.assertRaises(ValueError): self.board.write(channel,1500)

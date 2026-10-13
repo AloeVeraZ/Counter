@@ -201,6 +201,8 @@ body.servos-on .control-copy strong{color:var(--green)}
 #copy-calibration{display:block;margin-top:8px}
 #digit-positions{scroll-margin-top:132px}
 
+.range-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.range-fields .field{margin-bottom:0}
 .number-form{display:flex;gap:10px}
 .number-form input{flex:1;min-width:0;min-height:56px;font:700 30px var(--display);letter-spacing:.08em}
 .number-form button{min-width:104px}
