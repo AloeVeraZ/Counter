@@ -11,7 +11,11 @@ LIMIT_MAX_PULSE = 3000
 # The configurable pulse range starts here; widen it in Calibrate for servos that travel further.
 DEFAULT_MIN_PULSE = 600
 DEFAULT_MAX_PULSE = 2400
-RANGE_KEYS = {"min_pulse": DEFAULT_MIN_PULSE, "max_pulse": DEFAULT_MAX_PULSE}
+# Settings added after the first release. While they hold these defaults they are left
+# out of config.json, so releases that predate them can still read the file.
+OPTIONAL_KEYS = {"min_pulse": DEFAULT_MIN_PULSE, "max_pulse": DEFAULT_MAX_PULSE,
+                 # Per servo: its wheel wraps (a 360° servo), so 9 and 0 are neighbours.
+                 "wrap": [False] * 16}
 
 
 def integer(value, minimum, maximum, label):
@@ -26,7 +30,7 @@ def pulse(value, minimum=LIMIT_MIN_PULSE, maximum=LIMIT_MAX_PULSE):
 
 def defaults():
     return {"count": 2, "settle_ms": 500, "pause_ms": 500, "release_after_move": True,
-            **RANGE_KEYS, "positions": [[None] * 10 for _ in range(16)]}
+            **deepcopy(OPTIONAL_KEYS), "positions": [[None] * 10 for _ in range(16)]}
 
 
 def validate(data):
@@ -41,6 +45,9 @@ def validate(data):
     high = integer(data["max_pulse"], LIMIT_MIN_PULSE, LIMIT_MAX_PULSE, "Maximum pulse (µs)")
     if high - low < 100:
         raise ValueError("The maximum pulse must be at least 100 µs above the minimum.")
+    wrap = data["wrap"]
+    if not isinstance(wrap, list) or len(wrap) != 16 or any(type(value) is not bool for value in wrap):
+        raise ValueError("Wrap-around needs a true or false setting for each of the sixteen servos.")
     positions = data["positions"]
     if not isinstance(positions, list) or len(positions) != 16:
         raise ValueError("Exactly sixteen channel calibration tables are required.")
@@ -64,8 +71,8 @@ class ConfigStore:
         # Preserve every calibration when upgrading the earlier configuration.
         if isinstance(data, dict):
             data.setdefault("pause_ms", 500)
-            for key, value in RANGE_KEYS.items():
-                data.setdefault(key, value)
+            for key, value in OPTIONAL_KEYS.items():
+                data.setdefault(key, deepcopy(value))
             if data.get("release_after_move") is False:
                 data["release_after_move"] = True
         self.data = validate(data)
@@ -78,8 +85,7 @@ class ConfigStore:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
                                              delete=False, suffix=".tmp") as handle:
                 filename = handle.name
-                # Leave the default range out so releases without range support can still read the file.
-                written = {key: value for key, value in candidate.items() if RANGE_KEYS.get(key, object()) != value}
+                written = {key: value for key, value in candidate.items() if OPTIONAL_KEYS.get(key, object()) != value}
                 json.dump(written, handle, indent=2)
                 handle.write("\n")
                 handle.flush()

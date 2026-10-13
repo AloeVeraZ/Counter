@@ -175,6 +175,11 @@ body.servos-on .control-copy strong{color:var(--green)}
 .step-label{margin:0 0 12px;font-size:13px;font-weight:600}
 .display-picker+.step-label{margin-top:24px}
 .display-picker{display:flex;flex-wrap:wrap;gap:8px}
+.wrap-toggle{margin:16px 0 0;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--well)}
+.wrap-toggle strong{display:block;font-size:13px}
+.wrap-toggle small{display:block;margin-top:4px;font-size:12px;line-height:1.6;color:var(--muted)}
+.wrap-toggle:has(input:checked){border-color:var(--accent-line);background:var(--accent-soft)}
+.wrap-toggle+.step-label{margin-top:24px}
 .display-chip{display:grid;justify-items:center;gap:3px;min-width:64px;padding:8px 10px}
 .display-chip strong{font:700 26px/1 var(--display)}
 .display-chip small{font-size:10px;font-weight:500;color:var(--amber)}

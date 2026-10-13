@@ -106,30 +106,33 @@ function calibrationRows(force = false) {
 function renderPicker() {
   if (!state) return;
   const {count, positions} = state.config;
-  const signature = JSON.stringify([count, positions, calChannel, state.moving_channel]);
+  const signature = JSON.stringify([count, positions, state.config.wrap, calChannel, state.moving_channel]);
   if (signature === pickerSignature) return;
   pickerSignature = signature;
   $('display-picker').replaceChildren(...Array.from({length:count}, (_, channel) => {
     const saved = positions[channel].filter(p => p !== null).length;
     const button = element('button', `display-chip${saved === 10 ? ' ready' : ''}${state.moving_channel === channel ? ' moving' : ''}`);
     button.type = 'button'; button.setAttribute('aria-pressed', String(channel === calChannel));
-    button.setAttribute('aria-label', `Servo ${channel}, ${saved} of 10 numbers saved`);
-    button.append(element('strong', null, String(channel)), element('small', null, saved === 10 ? '✓ Ready' : `${saved}/10`));
+    const wraps = state.config.wrap[channel];
+    button.setAttribute('aria-label', `Servo ${channel}, ${saved} of 10 numbers saved${wraps ? ', wraps around' : ''}`);
+    button.append(element('strong', null, `${channel}${wraps ? ' ↻' : ''}`), element('small', null, saved === 10 ? '✓ Ready' : `${saved}/10`));
     button.addEventListener('click', () => selectDisplay(channel));
     return button;
   }));
   const saved = positions[calChannel].filter(p => p !== null).length;
   $('picked-status').textContent = `Servo ${calChannel} · ${saved} of 10 saved`;
+  $('wrap-name').textContent = calChannel;
+  $('wrap-servo').checked = state.config.wrap[calChannel];
 }
 // Settings → Servos: a read-only overview of every channel's saved pulses; editing happens in Calibrate.
 function renderServoTable() {
   const {count, positions} = state.config;
-  const signature = JSON.stringify([count, positions]);
+  const signature = JSON.stringify([count, positions, state.config.wrap]);
   if (signature !== servoSignature) {
     servoSignature = signature;
     $('servo-rows').replaceChildren(...Array.from({length:16}, (_, channel) => {
       const used = channel < count, tr = element('tr', used ? '' : 'unused');
-      const name = element('th'); name.scope = 'row'; name.append(element('strong', null, `Servo ${channel}`), element('small', null, used ? 'In use' : 'Not in use'));
+      const name = element('th'); name.scope = 'row'; name.append(element('strong', null, `Servo ${channel}`), element('small', null, used ? state.config.wrap[channel] ? 'In use · wraps ↻' : 'In use' : 'Not in use'));
       const now = element('td', 'servo-now'); now.id = `servo-now-${channel}`;
       tr.append(name, now);
       for (let digit = 0; digit < 10; digit++) {
@@ -244,6 +247,7 @@ $('number-form').addEventListener('submit',event=>{event.preventDefault();setAut
 document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/step',{delta:Number(button.dataset.step)});$('number').value=result.number;})));
 $('zero').addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/number',{number:'0'});$('number').value=result.number;}));
 $('auto').addEventListener('click',()=>setAuto(!auto));
+$('wrap-servo').addEventListener('change',run(()=>{const channel=calChannel,enabled=$('wrap-servo').checked;return command('/api/wrap',{channel,enabled},enabled?`Servo ${channel} now wraps: 9 → 0 moves forward one step.`:`Servo ${channel} no longer wraps.`).catch(error=>{$('wrap-servo').checked=!enabled;throw error;});}));
 $('test-sequence').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);return command('/api/test-sequence',{});}));
 $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number($('interval').value);});
 $('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Servos are off.'))();});
@@ -256,9 +260,10 @@ $('copy-calibration').addEventListener('click',run(async()=>{
   if(!saved.some(width=>width!==null)){notice(`Save some pulses on servo ${source} first.`,true);return;}
   const extra=unsavedCount()?' Unsaved changes on this servo are not copied.':'';
   const others=Array.from({length:count},(_,channel)=>channel).filter(channel=>channel!==source).join(', ');
-  if(!window.confirm(`Copy servo ${source}'s saved pulses to servo${count===2?'':'s'} ${others}? Their saved pulses will be replaced.${extra}`))return;
+  if(!window.confirm(`Copy servo ${source}'s saved pulses to servo${count===2?'':'s'} ${others}? Their saved pulses and wrap-around setting will be replaced.${extra}`))return;
   setAuto(false);clearTimeout(previewTimer);
-  for(let channel=0;channel<count;channel++){if(channel!==source)await command('/api/calibration',{channel,positions:saved});}
+  const wraps=state.config.wrap[source];
+  for(let channel=0;channel<count;channel++){if(channel===source)continue;await command('/api/calibration',{channel,positions:saved});if(state.config.wrap[channel]!==wraps)await command('/api/wrap',{channel,enabled:wraps});}
   notice(`Copied servo ${source} to the others. Check each one and fine-tune any that look off.`);
 }));
 function renderUpdates(){

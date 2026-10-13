@@ -37,6 +37,7 @@
         <div class="panel-body">
           <p class="step-label">1 · Choose a servo (board channel 0–15)</p>
           <div id="display-picker" class="display-picker" role="group" aria-label="Servo to calibrate"></div>
+          <label class="checkbox wrap-toggle"><input type="checkbox" id="wrap-servo"><span><strong>Servo <span id="wrap-name">0</span> wraps around (360° servo)</strong><small>Turn on if this wheel can go from 9 forward to 0. It then takes the shorter way round, so counting up rolls on like a car odometer instead of running back through 8 to 1.</small></span></label>
           <p class="step-label">2 · Type a pulse or press − / + until each number sits in its window</p>
           <div id="calibration-rows" class="calibration-rows"></div>
                     <button class="primary wide" id="save-calibration">Save servo 0</button>
@@ -48,6 +49,7 @@
               <li>Grey pulses are suggestions for numbers you haven't set. Click an empty box and press Tab to use the suggestion. Nothing is saved until you press Save.</li>
               <li>Go gently near the ends of travel, and stop if the mechanism hits its limit.</li>
               <li>Saving turns the servos off. Press Start again for the next servo.</li>
+              <li>Wraps around: for a 360° servo, space 0–9 evenly round the full turn and keep 0 and 9 about half a step in from the ends of the pulse range. Every move is still one number, so the servo's shorter way round is always the right way. If a servo doesn't really wrap, 9 to 0 simply runs back in one move; turn the setting off again.</li>
               <li>Settings → Servos shows every servo's saved pulses at a glance.</li>
             </ul>
           </details>

@@ -177,6 +177,12 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
         return jsonify({**controller.snapshot(), "version": __version__, "instance": token[:12],
                         "installed_commit": getattr(updater, "installed", ""), "message": message})
 
+    @app.post("/api/wrap")
+    def wrap():
+        data = body(["channel", "enabled"], ["channel", "enabled"])
+        controller.set_wrap(data["channel"], data["enabled"])
+        return state()
+
     @app.post("/api/preview")
     def preview():
         data = body(["channel", "pulse_us"], ["channel", "pulse_us"])

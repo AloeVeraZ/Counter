@@ -11,6 +11,7 @@
 - Keep movements interruptible and sequential. Stop must disable OE immediately.
 - From a known digit, visit each neighboring saved digit before the target. Validate the entire path before moving.
 - Exception chosen by the owner: Display → Test configuration counts each servo 0 up to 9 through every digit, then returns directly to 0.
+- Exception chosen by the owner: a servo marked as wrapping (a 360° wheel) treats 9 and 0 as neighbours and takes the shorter way round, forward on a tie, still one digit per move.
 - Always release PWM after each move, then pause. Never keep earlier channels holding while another moves.
 - An unknown starting position cannot guarantee a one-digit physical move without feedback; document that limit.
 - Do not claim the Pi's GPIO/USB-C can power sixteen servos. Servo V+ needs a supply sized for the actual hardware.

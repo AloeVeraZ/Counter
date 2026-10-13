@@ -70,6 +70,13 @@ class Counter:
                 if current is None:
                     # No encoder: the first explicit command establishes a reference.
                     ticks = [target]
+                elif self.store.data["wrap"][channel]:
+                    # A wrapping wheel treats 9 and 0 as neighbours: take the shorter way round,
+                    # forward on a tie, still one number per move.
+                    previous = int(current)
+                    forward, backward = (target - previous) % 10, (previous - target) % 10
+                    direction, steps = (1, forward) if forward <= backward else (-1, backward)
+                    ticks = [(previous + direction * step) % 10 for step in range(1, steps + 1)]
                 else:
                     previous = int(current)
                     direction = 1 if target > previous else -1
@@ -184,6 +191,17 @@ class Counter:
             self.store.save(data)
             self.requested = "0".zfill(data["count"])
             self.digits = [None] * 16
+
+    def set_wrap(self, channel, enabled):
+        with self.lock:
+            if self.busy:
+                raise ValueError("Wait for the movement to finish before changing wrap-around.")
+            integer(channel, 0, 15, "Channel")
+            if type(enabled) is not bool:
+                raise ValueError("Wrap-around must be on or off.")
+            data = deepcopy(self.store.data)
+            data["wrap"][channel] = enabled
+            self.store.save(data)
 
     def calibrate(self, channel, positions):
         with self.lock:

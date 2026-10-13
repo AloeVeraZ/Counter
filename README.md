@@ -189,6 +189,19 @@ Servos are numbered by their board channel, 0–15; servo 0 is the leftmost digi
 6. In **Calibrate → Try a number**, enter a number. Leading zeros fill unused
    places. The **Display** tab shows the commanded number as a live preview.
 
+### Wrap-around (360° servos)
+
+Some servos have no end stop and turn whichever way is shorter to reach a new
+position. For such a wheel, space 0–9 evenly round the full turn (36° apart),
+keep 0 and 9 about half a step in from the ends of the pulse range, and turn on
+**Servo N wraps around** under the servo buttons in Calibrate. Counter then
+treats 9 and 0 as neighbours and takes the shorter way round, forward on a tie,
+still one number per move: counting 09 → 10 rolls the last wheel forward from 9
+to 0 like a car odometer. Because each move is a single 36° step, the servo's
+own shorter way is always the intended direction. The setting is per servo and
+off by default; a servo that does not really wrap just runs back from 9 to 0 in
+one move. Wrapping servos show ↻ in Calibrate and in Settings → Servos.
+
 To check the whole build, press **Start**, then **Display → Test configuration**.
 Each fully calibrated servo, starting with servo 0, counts from 0 up to 9 one
 number at a time, then returns straight to 0 before the next servo begins; the

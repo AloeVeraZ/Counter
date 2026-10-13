@@ -247,6 +247,48 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(active,[1]*16)
         self.assertEqual(self.board.pulses,{})
 
+    def path_to(self, start, target, wrap):
+        """Digits servo 0 visits going from a known start to target."""
+        self.calibrate(count=1)
+        self.counter.set_wrap(0, wrap)
+        self.counter.arm()
+        self.counter.digits[0] = str(start)
+        self.board.commands.clear()
+        self.counter.show(str(target))
+        self.finish()
+        return [(width - 1000) // 100 for _, width in self.board.commands]
+
+    def test_wrapping_servo_rolls_forward_from_9_to_0_and_takes_the_shorter_way(self):
+        self.assertEqual(self.path_to(9, 0, wrap=True), [0])
+        self.assertEqual(self.path_to(8, 1, wrap=True), [9, 0, 1])
+        self.assertEqual(self.path_to(1, 8, wrap=True), [0, 9, 8])
+        self.assertEqual(self.path_to(2, 7, wrap=True), [3, 4, 5, 6, 7])  # tie goes forward
+        self.assertEqual(self.path_to(7, 2, wrap=True), [8, 9, 0, 1, 2])
+
+    def test_servos_that_do_not_wrap_still_step_back_through_every_number(self):
+        self.assertEqual(self.path_to(9, 0, wrap=False), [8, 7, 6, 5, 4, 3, 2, 1, 0])
+
+    def test_counting_up_carries_like_an_odometer_on_wrapping_servos(self):
+        self.calibrate(count=2)
+        self.counter.set_wrap(1, True)
+        self.counter.arm()
+        self.counter.digits[:2] = ["0", "9"]
+        self.counter.requested = "09"
+        self.counter.step(1)
+        self.finish()
+        self.assertEqual(self.board.commands, [(0, 1100), (1, 1001)])
+        self.assertEqual(self.counter.digits[:2], ["1", "0"])
+
+    def test_wrap_setting_is_saved_and_left_out_of_the_file_while_off(self):
+        self.counter.calibrate(0, [1500] * 10)
+        self.assertNotIn('wrap', json.loads(self.store.path.read_text()))
+        self.counter.set_wrap(3, True)
+        self.assertTrue(ConfigStore(self.store.path).data['wrap'][3])
+        self.assertFalse(ConfigStore(self.store.path).data['wrap'][2])
+        for channel, enabled in [(16, True), (0, 'yes'), (-1, False)]:
+            with self.subTest(channel=channel, enabled=enabled), self.assertRaises(ValueError):
+                self.counter.set_wrap(channel, enabled)
+
     def test_pulse_range_can_widen_for_servos_that_travel_further(self):
         self.counter.arm()
         with self.assertRaisesRegex(ValueError, "600 to 2400"):
@@ -422,6 +464,12 @@ class WebTests(unittest.TestCase):
         state=self.client.get('/api/state').json
         self.assertTrue(state['simulated'])
         self.assertFalse(state['armed'])
+
+    def test_wrap_endpoint_saves_each_servo_separately(self):
+        response=self.post('/api/wrap',{'channel':1,'enabled':True})
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertEqual(response.json['config']['wrap'][:3],[False,True,False])
+        self.assertEqual(self.post('/api/wrap',{'channel':1}).status_code,400)
 
     def test_configuration_test_endpoint_reports_tested_and_skipped_servos(self):
         self.assertEqual(self.post('/api/test-sequence',{}).status_code,400)  # servos off
