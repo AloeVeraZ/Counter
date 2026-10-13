@@ -7,7 +7,7 @@ import tempfile
 
 # The board never sends a pulse outside this envelope, whatever range is configured.
 LIMIT_MIN_PULSE = 300
-LIMIT_MAX_PULSE = 3000
+LIMIT_MAX_PULSE = 4000
 # The configurable pulse range starts here; widen it in Calibrate for servos that travel further.
 DEFAULT_MIN_PULSE = 600
 DEFAULT_MAX_PULSE = 2400

@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
 let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, previewTimer = null, draft = [], servoSignature = '', lastShown = [];
 const NUDGE = 10;
-// The configured pulse range (Calibrate → Pulse range), within the board's fixed 300–3000 µs envelope.
+// The configured pulse range (Calibrate → Pulse range), within the board's fixed 300–4000 µs envelope.
 function pulseMin() { return state?.config.min_pulse ?? 600; }
 function pulseMax() { return state?.config.max_pulse ?? 2400; }
 function schedulePoll(delay) { clearTimeout(pollTimer); pollTimer = setTimeout(tick,delay); }

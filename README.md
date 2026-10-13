@@ -222,7 +222,7 @@ at startup.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 Pulses must stay within **Calibrate → Pulse range**, 600–2400 µs by default.
-Widen it for servos that travel further, inside a fixed 300–3000 µs envelope the
+Widen it for servos that travel further, inside a fixed 300–4000 µs envelope the
 board never exceeds. Neither is **a statement that your servo can safely travel
 that far**; use the servo's datasheet and the mechanism's clearance. The range
 can't be narrowed past a saved pulse. While it is the default, `config.json`

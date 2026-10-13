@@ -304,9 +304,13 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(self.board.commands[-1], (0, 2700))
 
     def test_pulse_range_keeps_the_hardware_envelope_and_saved_pulses(self):
-        for low, high in [(299, 2400), (600, 3001), (1500, 1550), (2000, 1000)]:
+        for low, high in [(299, 2400), (600, 4001), (1500, 1550), (2000, 1000)]:
             with self.subTest(low=low, high=high), self.assertRaises(ValueError):
                 self.counter.configure({'min_pulse': low, 'max_pulse': high})
+        self.counter.configure({'max_pulse': 4000})
+        self.board.enable()
+        self.board.write(0, 4000)  # the top of the envelope reaches the board
+        self.counter.configure({'max_pulse': 2400})
         self.counter.calibrate(0, [2400] + [None] * 9)
         # Narrowing past a saved pulse is refused and names that pulse.
         with self.assertRaisesRegex(ValueError, "Servo 0, number 0 is 2400"):
@@ -428,7 +432,7 @@ class HardwareTests(unittest.TestCase):
 
     def test_signal_bounds_reject_nan_boolean_and_invalid_channel(self):
         self.board.enable()
-        for width in [299,3001,float('nan'),float('inf'),True,"1500",1500.5]:
+        for width in [299,4001,float('nan'),float('inf'),True,"1500",1500.5]:
             with self.subTest(width=width),self.assertRaises(ValueError): self.board.write(0,width)
         for channel in [-1,16,True]:
             with self.assertRaises(ValueError): self.board.write(channel,1500)
