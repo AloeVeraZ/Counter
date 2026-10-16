@@ -302,6 +302,29 @@ A hidden, disabled dashboard polls every fifteen seconds; foregrounding it
 refreshes immediately. Stop commands are sent immediately, independently of
 the polling interval.
 
+### Diagnose one servo without changing calibration
+
+In **Calibrate**, select the servo's actual board channel, then use **Test
+selected port**. Enter a pulse within that servo's limits and choose how long
+to send it (500 ms to 5 seconds). **Send test pulse** operates only that channel,
+even if neither servo has saved digits. It releases PWM afterwards and Stop
+interrupts it. Editing the test fields alone sends nothing; the test never
+saves a digit position or changes normal movement timing.
+
+The result shows the last requested pulse, duration, and whether PWM is active,
+released, interrupted, or the board command failed. This history also covers
+normal digit moves and calibration previews. It is held in memory, starts
+empty after a restart, and cannot confirm servo position, power, or movement.
+An I²C command succeeding does not mean a servo moved.
+
+For a servo that does not move, compare the two ports with the same valid test
+pulse. Disconnect servo power before swapping plugs. If the fault follows the
+servo, check its power, cable orientation, and programmed mode. If both servos
+work on one port but neither works on the other, inspect that port and wiring.
+Use a servo supply sized for the actual hardware; a working Pi or a connected
+PCA9685 does not establish that servo V+ has enough current. Keep calibration
+associated with its original servo when returning the plugs to their ports.
+
 ## Updates
 
 In **Settings → Software updates**, choose **Main · stable releases** or

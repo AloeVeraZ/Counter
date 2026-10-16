@@ -189,6 +189,66 @@ class CounterTests(unittest.TestCase):
         self.counter.configure({"count":2})
         self.assertEqual(self.store.data["positions"][1],table)
 
+    def test_single_port_test_uses_its_duration_without_saving_or_touching_other_ports(self):
+        before = deepcopy(self.store.data)
+        self.counter.arm()
+        waits = []
+        with patch.object(self.counter.cancel, 'wait', side_effect=lambda seconds: waits.append(seconds) or False):
+            self.counter.preview(1, 1500, 2000)
+            self.finish()
+        self.assertEqual(self.board.commands, [(1, 1500)])
+        self.assertEqual(waits, [2.0])
+        self.assertEqual(self.board.pulses, {})
+        self.assertEqual(self.store.data, before)
+        self.assertFalse(self.store.path.exists())
+        self.assertIsNone(self.counter.digits[1])
+        signals = self.counter.snapshot()['signals']
+        self.assertIsNone(signals[0])
+        self.assertEqual(signals[1], {'pulse_us': 1500, 'duration_ms': 2000, 'status': 'released'})
+        signals[1]['pulse_us'] = 999
+        self.assertEqual(self.counter.snapshot()['signals'][1]['pulse_us'], 1500)
+        restarted = Counter(ConfigStore(self.store.path), RecordingBoard())
+        self.addCleanup(restarted.close)
+        self.assertEqual(restarted.snapshot()['signals'], [None, None])
+
+    def test_single_port_test_rejects_bad_duration_before_writing(self):
+        self.counter.arm()
+        for duration in [99, 5001, True, '2000', 1000.5]:
+            with self.subTest(duration=duration), self.assertRaises(ValueError):
+                self.counter.preview(1, 1500, duration)
+        self.assertEqual(self.board.commands, [])
+        self.assertEqual(self.counter.snapshot()['signals'], [None, None])
+
+    def test_stop_interrupts_long_test_and_reports_unknown_position(self):
+        from threading import Event
+        self.fast_wait.stop()
+        written = Event()
+        original_write = self.board.write
+        def write(channel, width):
+            original_write(channel, width)
+            written.set()
+        self.counter.arm()
+        with patch.object(self.board, 'write', side_effect=write):
+            self.counter.preview(1, 1500, 5000)
+            self.assertTrue(written.wait(1))
+            started = time.monotonic()
+            self.counter.stop()
+            self.assertFalse(self.board.enabled)
+            self.finish()
+            self.assertLess(time.monotonic() - started, 0.5)
+        self.assertIsNone(self.counter.digits[1])
+        self.assertEqual(self.counter.snapshot()['signals'][1]['status'], 'interrupted')
+
+    def test_failed_test_pulse_is_reported_as_failed_not_released(self):
+        self.counter.arm()
+        with patch.object(self.board, 'write', side_effect=OSError('I2C write failed')):
+            self.counter.preview(1, 1500, 1000)
+            self.finish()
+        self.assertFalse(self.board.enabled)
+        self.assertFalse(self.counter.armed)
+        self.assertIn('I2C write failed', self.counter.error)
+        self.assertEqual(self.counter.snapshot()['signals'][1]['status'], 'failed')
+
     def test_every_move_releases_even_with_legacy_hold_setting(self):
         self.calibrate()
         self.store.data["release_after_move"] = False
@@ -474,6 +534,21 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.json)
         self.assertEqual(response.json['config']['wrap'][:3],[False,True,False])
         self.assertEqual(self.post('/api/wrap',{'channel':1}).status_code,400)
+
+    def test_single_port_api_keeps_duration_temporary_and_calibration_empty(self):
+        payload = {'channel': 1, 'pulse_us': 1500, 'duration_ms': 2000}
+        self.assertEqual(self.post('/api/preview', payload).status_code, 400)
+        self.post('/api/arm', {})
+        for invalid in [True, 5001, '2000']:
+            self.assertEqual(self.post('/api/preview', {**payload, 'duration_ms': invalid}).status_code, 400)
+        with patch.object(self.counter.cancel, 'wait', return_value=False):
+            self.assertEqual(self.post('/api/preview', payload).status_code, 200)
+            self.counter.worker.join(timeout=1)
+        state = self.client.get('/api/state').get_json()
+        self.assertEqual(state['config']['settle_ms'], 500)
+        self.assertEqual(state['config']['positions'][1], [None] * 10)
+        self.assertIsNone(state['signals'][0])
+        self.assertEqual(state['signals'][1], {'pulse_us': 1500, 'duration_ms': 2000, 'status': 'released'})
 
     def test_configuration_test_endpoint_reports_tested_and_skipped_servos(self):
         self.assertEqual(self.post('/api/test-sequence',{}).status_code,400)  # servos off

@@ -57,6 +57,17 @@
       </section>
       <aside class="stack">
         <section class="panel">
+          <div class="panel-head"><h2>Test selected port</h2><span class="pill" id="test-port">CH 0</span></div>
+          <form class="panel-body" id="pulse-test-form">
+            <p class="help">Sends one pulse to the selected servo above. Works without saved digits and does not change calibration. Changing these fields does not move anything.</p>
+            <label class="field">Test pulse (µs) <input id="test-pulse" type="number" value="1500" min="600" max="2400" step="1" inputmode="numeric" required></label>
+            <label class="field">Signal duration <select id="test-duration"><option value="500">500 ms</option><option value="1000" selected>1 second</option><option value="2000">2 seconds</option><option value="5000">5 seconds</option></select></label>
+            <button class="wide" id="send-test-pulse" type="submit" disabled>Send test pulse to CH 0</button>
+            <p class="help" id="last-signal" role="status">No pulse sent to this port since Counter started.</p>
+            <p class="help">A sent pulse confirms the board command, not servo movement. The signal releases when the duration ends. Stop interrupts it immediately. Use pulse limits appropriate for the connected servo.</p>
+          </form>
+        </section>
+        <section class="panel">
           <div class="panel-head"><h2>Your setup</h2></div>
           <form class="panel-body" id="setup-form">
             <label class="field">Number of displays <select id="count" name="count"></select></label>

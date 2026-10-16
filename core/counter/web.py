@@ -185,8 +185,8 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
 
     @app.post("/api/preview")
     def preview():
-        data = body(["channel", "pulse_us"], ["channel", "pulse_us"])
-        controller.preview(data["channel"], data["pulse_us"])
+        data = body(["channel", "pulse_us", "duration_ms"], ["channel", "pulse_us"])
+        controller.preview(data["channel"], data["pulse_us"], data.get("duration_ms"))
         return state()
 
     @app.get("/api/updates")

@@ -60,7 +60,7 @@ function previewSoon(channel, width, delay = 200) {
 function selectDisplay(channel) {
   if (channel === calChannel) return true;
   if (unsavedCount() && !window.confirm(`Servo ${calChannel} has unsaved changes. Discard them?`)) return false;
-  setAuto(false); clearTimeout(previewTimer); calChannel = channel; pickerSignature = ''; calibrationRows(true); renderPicker();
+  setAuto(false); clearTimeout(previewTimer); calChannel = channel; pickerSignature = ''; calibrationRows(true); renderPicker(); renderPulseTest();
   return true;
 }
 function calibrationRows(force = false) {
@@ -123,6 +123,16 @@ function renderPicker() {
   $('picked-status').textContent = `Servo ${calChannel} · ${saved} of 10 saved`;
   $('wrap-name').textContent = calChannel;
   $('wrap-servo').checked = state.config.wrap[calChannel];
+}
+function renderPulseTest() {
+  $('test-port').textContent = `CH ${calChannel}`;
+  $('send-test-pulse').textContent = `Send test pulse to CH ${calChannel}`;
+  $('send-test-pulse').disabled = !state.armed || state.busy;
+  const input = $('test-pulse'); input.min = pulseMin(); input.max = pulseMax();
+  const signal = state.signals?.[calChannel];
+  const status = {active:'PWM active', released:'PWM released', interrupted:'Interrupted', failed:'Board command failed'};
+  const detail = signal ? `${state.simulated ? 'Simulation · ' : ''}CH ${calChannel}: ${signal.pulse_us} µs · requested ${signal.duration_ms} ms · ${status[signal.status] || signal.status}. Physical position is not measured.` : 'No pulse sent to this port since Counter started.';
+  if ($('last-signal').textContent !== detail) $('last-signal').textContent = detail;
 }
 // Settings → Servos: a read-only overview of every channel's saved pulses; editing happens in Calibrate.
 function renderServoTable() {
@@ -226,6 +236,7 @@ function render(value) {
   }
   calibrationRows();
   renderPicker();
+  renderPulseTest();
   renderServoTable();
   document.querySelectorAll('.test').forEach(button=>{button.disabled=!value.armed || value.busy;});
   $('save-calibration').disabled = $('copy-calibration').disabled = value.busy;
@@ -253,6 +264,7 @@ $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number
 $('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Servos are off.'))();});
 $('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved. Servos are off.'))();});
 $('range-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);clearTimeout(previewTimer);run(()=>command('/api/setup',{min_pulse:Number($('min-pulse').value),max_pulse:Number($('max-pulse').value)},'Pulse range saved. Servos are off.').then(()=>calibrationRows(true)))();});
+$('pulse-test-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);clearTimeout(previewTimer);const channel=calChannel;run(()=>command('/api/preview',{channel,pulse_us:Number($('test-pulse').value),duration_ms:Number($('test-duration').value)},`Test pulse sent to CH ${channel}. Check the servo physically; position is not measured.`))();});
 $('gobilda-torque-range').addEventListener('click',()=>{$('min-pulse').value=500;$('max-pulse').value=2500;notice('500–2500 µs filled for goBILDA 2000-0025-0002 position mode (300°). Check all connected servos, then Save range. Nothing saved or moved.');});
 $('save-calibration').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Servo ${channel} saved. Servos are off.`).then(()=>calibrationRows(true));}));
 // For identical servos: copy one servo's saved pulses to the others, then fine-tune any that differ.

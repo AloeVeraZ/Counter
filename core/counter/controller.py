@@ -17,6 +17,8 @@ class Counter:
         self.digits = [None] * 16
         self.moving_channel = None
         self.moving_digit = None
+        # Command history only, never measured positions or saved calibration.
+        self.signals = [None] * 16
         self.error = ""
         self.board.disable()
 
@@ -29,6 +31,7 @@ class Counter:
             return {"config": deepcopy(self.store.data), "number": self.requested,
                     "digits": self.digits[:self.store.data["count"]], "armed": self.armed,
                     "busy": self.busy, "moving_channel": self.moving_channel, "moving_digit": self.moving_digit,
+                    "signals": deepcopy(self.signals[:self.store.data["count"]]),
                     "error": self.error, "board": board, "simulated": self.board.simulated}
 
     def arm(self):
@@ -47,6 +50,9 @@ class Counter:
             if self.moving_channel is not None:
                 self.digits[self.moving_channel] = None
             self.board.disable()
+            for signal in self.signals:
+                if signal and signal["status"] == "active":
+                    signal["status"] = "interrupted"
 
     def _ready(self):
         if self.busy:
@@ -124,7 +130,7 @@ class Counter:
             self._start(moves)
             return tested, skipped
 
-    def preview(self, channel, width):
+    def preview(self, channel, width, duration_ms=None):
         with self.lock:
             self._ready()
             integer(channel, 0, self.store.data["count"] - 1, "Channel")
@@ -132,15 +138,19 @@ class Counter:
             if type(width) is not int or not low <= width <= high:
                 raise ValueError(f"Choose a pulse from {low} to {high} µs, or widen the pulse range in Calibrate.")
             pulse(width)
-            self._start([(channel, width, None)])
+            if duration_ms is not None:
+                integer(duration_ms, 100, 5000, "Test signal duration (ms)")
+            self._start([(channel, width, None)], duration_ms)
 
-    def _start(self, moves):
+    def _start(self, moves, duration_ms=None):
         if not moves:
             return
         self.cancel.clear()
         self.busy = True
         self.error = ""
         settings = deepcopy(self.store.data)
+        if duration_ms is not None:
+            settings["settle_ms"] = duration_ms
         self.worker = Thread(target=self._move, args=(moves, settings), name="counter-servo", daemon=True)
         self.worker.start()
 
@@ -153,6 +163,7 @@ class Counter:
                     self.moving_channel, self.moving_digit = channel, digit
                     self.digits[channel] = None
                     self.board.write(channel, width)
+                    self.signals[channel] = {"pulse_us": width, "duration_ms": settings["settle_ms"], "status": "active"}
                 if self.cancel.wait(settings["settle_ms"] / 1000):
                     break
                 with self.lock:
@@ -160,6 +171,7 @@ class Counter:
                         break
                     # One active PWM channel, including between ticks on the same servo.
                     self.board.release(channel)
+                    self.signals[channel]["status"] = "released"
                     self.digits[channel] = digit
                     self.moving_channel = self.moving_digit = None
                 if index < len(moves) - 1 and self.cancel.wait(settings["pause_ms"] / 1000):
@@ -167,6 +179,8 @@ class Counter:
         except Exception as error:
             with self.lock:
                 self.error = f"Movement failed: {error}"
+                if self.moving_channel is not None:
+                    self.signals[self.moving_channel] = {"pulse_us": width, "duration_ms": settings["settle_ms"], "status": "failed"}
                 self.armed = False
                 self.cancel.set()
                 try:
@@ -175,6 +189,10 @@ class Counter:
                     self.error += f"; output disable failed: {stop_error}"
         finally:
             with self.lock:
+                if self.moving_channel is not None:
+                    signal = self.signals[self.moving_channel]
+                    if signal and signal["status"] == "active":
+                        signal["status"] = "interrupted"
                 self.busy = False
                 self.moving_channel = self.moving_digit = None
 
