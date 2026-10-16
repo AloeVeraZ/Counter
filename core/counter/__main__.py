@@ -14,7 +14,7 @@ from .auth import PiPasswordAuth, session_key
 def main():
     parser = argparse.ArgumentParser(description="Counter mechanical digit dashboard")
     parser.add_argument("--simulate", action="store_true", help="Preview without a Raspberry Pi or servos")
-    parser.add_argument("--start-stopped", action="store_true", help="Start with E-stop latched until explicitly reset")
+    parser.add_argument("--start-stopped", action="store_true", help="Start with outputs off until an explicit Test")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, action="append", help="Listen port; repeat to serve several (default 8080)")
     parser.add_argument("--config", type=Path, default=Path(os.environ.get("COUNTER_CONFIG", str(Path.home() / ".counter" / "config.json"))))

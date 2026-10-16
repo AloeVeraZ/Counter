@@ -88,7 +88,7 @@ function calibrationRows(force = false) {
     const plus = element('button', 'nudge', '+'); plus.setAttribute('aria-label', `Raise the pulse for number ${digit}`); plus.addEventListener('click', () => nudge(1));
     const field = element('label', 'pulse-field'); field.append(input, element('span', null, 'µs'));
     const test = element('button', 'test', 'Test'); test.setAttribute('aria-label', `Test number ${digit}`);
-    test.addEventListener('click', run(() => { setAuto(false); const width = draft[digit] ?? suggested; return command('/api/preview', {channel, pulse_us: width}, draft[digit] === null || draft[digit] === undefined ? `Number ${digit} isn't set yet, so this tried the suggested ${width} µs.` : ''); }));
+    test.addEventListener('click', run(() => { setAuto(false); const width = draft[digit] ?? suggested; return command('/api/preview', {channel, pulse_us: width}); }));
     row.append(element('span', 'digit-label', String(digit)), minus, field, plus, test, element('span', 'row-status'));
     return row;
   }));
@@ -118,7 +118,7 @@ function renderPicker() {
 function renderPulseTest() {
   $('test-port').textContent = `CH ${calChannel}`;
   $('send-test-pulse').textContent = `Send test pulse to CH ${calChannel}`;
-  $('send-test-pulse').disabled = !canMove() || state.busy || !state.board.connected;
+  $('send-test-pulse').disabled = false;
   const input = $('test-pulse'); input.min = pulseMin(); input.max = pulseMax();
   const signal = state.signals?.[calChannel];
   const status = {active:'PWM active', released:'PWM released', interrupted:'Interrupted', failed:'Board command failed'};
@@ -175,15 +175,12 @@ function render(value) {
   $('mode').textContent = value.simulated ? 'SIMULATION · NO HARDWARE' : 'PCA9685 · 16 channels';
   $('movement').textContent = value.busy ? value.moving_channel === null ? 'Pausing between moves' : `Moving servo ${value.moving_channel}` : value.estopped ? 'E-stop active' : canMove() ? 'Ready' : 'Outputs stopped';
   $('movement').className = `status ${canMove() ? 'good' : ''}`;
-  $('control-title').textContent = value.estopped ? 'E-stop active' : canMove() ? 'Ready to test' : 'Outputs stopped';
+  $('control-title').textContent = value.estopped ? 'Stopped · Test is ready' : 'Ready to test';
   $('control-help').textContent = !value.board.connected && !value.simulated ? 'The servo board is offline. Check Settings → Servo board.'
-    : value.estopped ? 'Movement is blocked. Reset E-stop using the same button when the mechanism is clear. Resetting does not move a servo.'
+    : value.estopped ? 'Press any Test button to send that position. No Start or reset step. Editing values sends no movement.'
     : `Edit pulses freely, then press Test to move the selected servo. Typing, − / +, and Tab send no movement.${value.simulated ? ' (Preview only: no real servos.)' : ''}`;
   document.querySelector('.control-bar').classList.toggle('on', canMove());
   document.body.classList.toggle('servos-on', canMove());
-  $('stop').textContent = value.estopped ? 'Reset E-stop' : 'E-stop';
-  $('stop').setAttribute('aria-pressed', String(Boolean(value.estopped)));
-  $('stop').title = value.estopped ? 'Reset the stop latch without moving any servo' : 'Disable servo signals immediately';
   $('show-number').disabled = !canMove() || value.busy;
   document.querySelectorAll('[data-step]').forEach(button => {button.disabled = !canMove() || value.busy;});
   $('zero').disabled = !canMove() || value.busy;
@@ -228,9 +225,9 @@ function render(value) {
   renderPicker();
   renderPulseTest();
   renderServoTable();
-  document.querySelectorAll('.test').forEach(button=>{button.disabled=!canMove() || value.busy || !value.board.connected;});
+  document.querySelectorAll('.test').forEach(button=>{button.disabled=false;});
   $('save-calibration').disabled = $('copy-calibration').disabled = value.busy;
-  $('test-sequence').disabled = !canMove() || value.busy || !value.board.connected;
+  $('test-sequence').disabled = value.busy || !value.board.connected;
   $('test-sequence').textContent = value.busy && value.armed ? 'Testing…' : 'Test configuration';
   $('board-connected').textContent = value.simulated ? 'PREVIEW' : value.board.connected ? 'CONNECTED' : 'OFFLINE';
   $('board-connected').className = `pill ${value.board.connected ? 'good' : 'bad'}`;
@@ -241,8 +238,8 @@ function render(value) {
   if (value.error) notice(value.error,true);
 }
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>view(button.dataset.view)));
-function emergencyStop(){setAuto(false);return command('/api/stop',{},'E-stop active. Servo signals are disabled.');}
-$('stop').addEventListener('click',run(()=>state?.estopped ? command('/api/reset-estop',{},'E-stop reset. Press Test or Show to move; resetting sends no movement.') : emergencyStop()));
+function emergencyStop(){setAuto(false);return command('/api/stop',{},'Stopped. Press Test to send a new position.');}
+$('stop').addEventListener('click',run(emergencyStop));
 if ($('logout')) $('logout').addEventListener('click',run(async()=>{setAuto(false);await command('/api/logout',{});window.location.assign('/login');}));
 $('number-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/number',{number:$('number').value.trim()}))();});
 document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/step',{delta:Number(button.dataset.step)});$('number').value=result.number;})));
@@ -254,7 +251,7 @@ $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number
 $('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Press Test to try a pulse.'))();});
 $('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved.'))();});
 $('range-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/setup',{min_pulse:Number($('min-pulse').value),max_pulse:Number($('max-pulse').value)},'Pulse range saved. Press Test to try a pulse.').then(()=>calibrationRows(true)))();});
-$('pulse-test-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);const channel=calChannel;run(()=>command('/api/preview',{channel,pulse_us:Number($('test-pulse').value),duration_ms:Number($('test-duration').value)},`Test pulse sent to CH ${channel}. Check the servo physically; position is not measured.`))();});
+$('pulse-test-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);const channel=calChannel;run(()=>command('/api/preview',{channel,pulse_us:Number($('test-pulse').value),duration_ms:Number($('test-duration').value)}))();});
 $('gobilda-torque-range').addEventListener('click',()=>{$('min-pulse').value=500;$('max-pulse').value=2500;notice('500–2500 µs filled for goBILDA 2000-0025-0002 position mode (300°). Check all connected servos, then Save range. Nothing saved or moved.');});
 $('save-calibration').addEventListener('click',run(()=>{setAuto(false);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Servo ${channel} saved. Press Test to try a pulse.`).then(()=>calibrationRows(true));}));
 // For identical servos: copy one servo's saved pulses to the others, then fine-tune any that differ.
@@ -415,7 +412,7 @@ async function tick(){
       else if(nextCount===null)nextCount=Date.now()+Number($('interval').value);
       else if(Date.now()>=nextCount){nextCount=null;const response=await command('/api/step',{delta:1});$('number').value=response.number;}
     }
-  }catch(error){setAuto(false);$('connection').textContent='Disconnected';$('connection').className='status bad';$('show-number').disabled=$('send-test-pulse').disabled=true;document.querySelectorAll('.test').forEach(button=>{button.disabled=true;});notice(error.message||'Can’t reach Counter. Counting is paused.',true);}
+  }catch(error){setAuto(false);$('connection').textContent='Disconnected';$('connection').className='status bad';$('show-number').disabled=true;notice(error.message||'Can’t reach Counter. Counting is paused.',true);}
   finally{ticking=false;schedulePoll(pollDelay());}
 }
 tick();

@@ -56,9 +56,6 @@ class CounterTests(unittest.TestCase):
 
     def test_configuration_test_counts_each_servo_up_then_snaps_to_zero(self):
         self.calibrate(count=2)
-        with self.assertRaises(ValueError):
-            self.counter.test_sequence()  # servos off
-        self.counter.arm()
         self.assertEqual(self.counter.test_sequence(), ([0, 1], []))
         self.finish()
         path = [0, *range(1, 10), 0]
@@ -211,7 +208,7 @@ class CounterTests(unittest.TestCase):
         self.addCleanup(restarted.close)
         self.assertEqual(restarted.snapshot()['signals'], [None, None])
 
-    def test_ready_tests_after_save_but_never_reset_a_latched_estop(self):
+    def test_test_after_estop_needs_no_reset_but_invalid_tests_leave_outputs_stopped(self):
         self.counter.auto_ready = True
         self.counter.calibrate(1, [None] * 10)
         self.assertTrue(self.counter.snapshot()['ready'])
@@ -224,16 +221,66 @@ class CounterTests(unittest.TestCase):
         self.counter.calibrate(1, [None] * 10)
         self.assertTrue(self.counter.snapshot()['estopped'])
         self.assertFalse(self.counter.snapshot()['ready'])
-        with self.assertRaisesRegex(ValueError, 'E-stop is active'):
-            self.counter.preview(1, 1700)
+        with self.assertRaises(ValueError):
+            self.counter.preview(1, 5000)
         self.assertFalse(self.board.enabled)
-        self.assertEqual(self.board.commands, [(1, 1500)])
-        self.counter.arm()  # Explicit E-stop reset clears signals without movement.
-        self.assertFalse(self.counter.snapshot()['estopped'])
         self.assertEqual(self.board.commands, [(1, 1500)])
         self.counter.preview(1, 1700)
         self.finish()
+        self.assertFalse(self.counter.snapshot()['estopped'])
         self.assertEqual(self.board.commands[-1], (1, 1700))
+
+    def test_new_test_interrupts_previous_test_instead_of_requiring_start_or_wait(self):
+        from threading import Event
+        self.fast_wait.stop()
+        written = Event()
+        write = self.board.write
+        def record(channel, width):
+            self.assertFalse(self.board.pulses)
+            write(channel, width)
+            written.set()
+        with patch.object(self.board, 'write', side_effect=record):
+            self.counter.preview(0, 1400, 5000)
+            self.assertTrue(written.wait(1))
+            started = time.monotonic()
+            self.assertTrue(self.counter.preview(1, 1700, 100))
+            self.finish()
+            self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual(self.board.commands, [(0, 1400), (1, 1700)])
+        self.assertEqual(self.counter.signals[0]['status'], 'interrupted')
+        self.assertEqual(self.counter.signals[1]['status'], 'released')
+
+    def test_estop_during_test_replacement_cancels_pending_test(self):
+        from threading import Event, Thread
+        self.fast_wait.stop()
+        written, joining, proceed = Event(), Event(), Event()
+        write = self.board.write
+        def record(channel, width):
+            write(channel, width)
+            written.set()
+        with patch.object(self.board, 'write', side_effect=record):
+            self.counter.preview(0, 1400, 5000)
+            self.assertTrue(written.wait(1))
+        previous = self.counter.worker
+        join = previous.join
+        def delayed_join(timeout):
+            joining.set()
+            proceed.wait(2)
+            join(timeout)
+        results = []
+        with patch.object(previous, 'join', side_effect=delayed_join):
+            request = Thread(target=lambda: results.append(self.counter.preview(1, 1700)))
+            request.start()
+            try:
+                self.assertTrue(joining.wait(1))
+                self.counter.stop()
+            finally:
+                proceed.set()
+                request.join(timeout=2)
+        self.assertEqual(results, [False])
+        self.assertFalse(self.counter.armed)
+        self.assertFalse(self.board.enabled)
+        self.assertEqual(self.board.commands, [(0, 1400)])
 
     def test_ready_mode_validates_whole_command_before_enabling_outputs(self):
         self.counter.auto_ready = True
@@ -571,8 +618,7 @@ class WebTests(unittest.TestCase):
 
     def test_single_port_api_keeps_duration_temporary_and_calibration_empty(self):
         payload = {'channel': 1, 'pulse_us': 1500, 'duration_ms': 2000}
-        self.assertEqual(self.post('/api/preview', payload).status_code, 400)
-        self.post('/api/arm', {})
+        self.post('/api/stop', {})
         for invalid in [True, 5001, '2000']:
             self.assertEqual(self.post('/api/preview', {**payload, 'duration_ms': invalid}).status_code, 400)
         with patch.object(self.counter.cancel, 'wait', return_value=False):
@@ -604,13 +650,14 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.post('/api/arm',{}).status_code,200)
         self.assertTrue(self.counter.armed)
 
-    def test_estop_reset_is_explicit_and_never_sends_a_pulse(self):
+    def test_calibration_test_after_estop_requires_no_reset_and_keeps_authentication(self):
         self.counter.auto_ready = True
         self.assertEqual(self.post('/api/stop', {}).status_code, 200)
-        self.assertEqual(self.post('/api/preview', {'channel': 1, 'pulse_us': 1500}).status_code, 400)
-        self.assertEqual(self.client.post('/api/reset-estop', json={}).status_code, 403)
+        self.assertEqual(self.client.post('/api/preview', json={'channel': 1, 'pulse_us': 1500}).status_code, 403)
         self.assertTrue(self.client.get('/api/state').get_json()['estopped'])
-        self.assertEqual(self.post('/api/reset-estop', {}).status_code, 200)
+        with patch.object(self.counter.cancel, 'wait', return_value=False):
+            self.assertEqual(self.post('/api/preview', {'channel': 1, 'pulse_us': 1500}).status_code, 200)
+            self.counter.worker.join(timeout=1)
         self.assertFalse(self.client.get('/api/state').get_json()['estopped'])
         self.assertTrue(self.counter.board.enabled)
         self.assertEqual(self.counter.board.pulses, {})

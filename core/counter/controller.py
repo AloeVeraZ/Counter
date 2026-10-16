@@ -11,6 +11,7 @@ class Counter:
         self.lock = RLock()
         self.cancel = Event()
         self.worker = None
+        self.motion_revision = 0
         self.armed = False
         self.auto_ready = auto_ready
         self.estopped = False
@@ -49,6 +50,7 @@ class Counter:
 
     def stop(self, *, latch=True):
         with self.lock:
+            self.motion_revision += 1
             self.cancel.set()
             self.armed = False
             if latch:
@@ -60,13 +62,13 @@ class Counter:
                 if signal and signal["status"] == "active":
                     signal["status"] = "interrupted"
 
-    def _ready(self):
+    def _ready(self, *, allow_stopped=False):
         if self.busy:
             raise ValueError("A display is moving. Wait or press Stop.")
-        if self.estopped:
-            raise ValueError("E-stop is active. Reset E-stop before sending another movement command.")
-        if not self.armed and not self.auto_ready:
-            raise ValueError("Outputs are stopped. Reset E-stop before sending a movement command.")
+        if self.estopped and not allow_stopped:
+            raise ValueError("Outputs are stopped. Press a calibration Test to send a new position.")
+        if not self.armed and not self.auto_ready and not allow_stopped:
+            raise ValueError("Outputs are stopped. Press a calibration Test to send a new position.")
 
     def show(self, number):
         with self.lock:
@@ -120,7 +122,7 @@ class Counter:
         mechanism's starting position. Servos without all ten numbers are skipped.
         """
         with self.lock:
-            self._ready()
+            self._ready(allow_stopped=True)
             count = self.store.data["count"]
             positions = self.store.data["positions"]
             tested = [channel for channel in range(count) if None not in positions[channel]]
@@ -140,7 +142,6 @@ class Counter:
 
     def preview(self, channel, width, duration_ms=None):
         with self.lock:
-            self._ready()
             integer(channel, 0, self.store.data["count"] - 1, "Channel")
             low, high = self.store.data["min_pulse"], self.store.data["max_pulse"]
             if type(width) is not int or not low <= width <= high:
@@ -148,13 +149,27 @@ class Counter:
             pulse(width)
             if duration_ms is not None:
                 integer(duration_ms, 100, 5000, "Test signal duration (ms)")
+            # A Test is an explicit movement request, including after E-stop.
+            # Cancel the previous move before replacing it; never queue positions.
+            self.stop(latch=False)
+            revision, previous = self.motion_revision, self.worker
+        if previous is not None and previous.is_alive():
+            previous.join(timeout=2)
+        with self.lock:
+            # E-stop, a newer Test, or another command during cancellation wins.
+            if revision != self.motion_revision:
+                return False
+            if self.busy:
+                raise ValueError("The previous move has not stopped yet. Press E-stop and retry Test.")
+            self.arm()
             self._start([(channel, width, None)], duration_ms)
+            return True
 
     def _start(self, moves, duration_ms=None):
         if not moves:
             return
-        # Only an explicit, fully validated movement can re-enable signals after
-        # saving settings. A latched E-stop is checked by _ready and never reset here.
+        self.motion_revision += 1
+        # Re-enable only for the explicit movement validated by the caller.
         if not self.armed:
             self.arm()
         self.cancel.clear()

@@ -13,7 +13,7 @@
 <header class="topbar">
   <a class="brand" href="/" aria-label="Counter home"><span class="brand-mark" aria-hidden="true">C<span>_</span></span> COUNTER <small>v{{ version }}</small></a>
   <nav aria-label="Workspace"><button class="tab active" data-view="display" aria-current="page">Display</button><button class="tab" data-view="calibration">Calibrate</button><button class="tab" data-view="system">Settings</button></nav>
-  <div class="tools"><span id="connection" class="status">Connecting</span><button id="theme" class="theme" aria-label="Toggle light theme">◐</button>{% if login_required %}<button id="logout">Sign out</button>{% endif %}<button class="danger" id="stop" title="Disable servo signals immediately" aria-pressed="false">E-stop</button></div>
+  <div class="tools"><span id="connection" class="status">Connecting</span><button id="theme" class="theme" aria-label="Toggle light theme">◐</button>{% if login_required %}<button id="logout">Sign out</button>{% endif %}<button class="danger" id="stop" title="Disable servo signals immediately">E-stop</button></div>
 </header>
 <main>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
@@ -48,7 +48,7 @@
               <li>Typing a pulse, pressing − / +, or accepting a suggestion only edits the draft. Press that row's Test button to move the servo.</li>
               <li>Grey pulses are suggestions for numbers you haven't set. Click an empty box and press Tab to use the suggestion. Nothing is saved until you press Save.</li>
               <li>Go gently near the ends of travel, and stop if the mechanism hits its limit.</li>
-              <li>Saving sends no movement. The next Test works without a Start button. An active E-stop must be explicitly reset first.</li>
+              <li>Saving sends no movement. Test always sends the chosen pulse, including after E-stop. Pressing another Test replaces the current test.</li>
               <li>Wraps around chooses the shorter sequence of saved digits, forward on a tie. A position servo can still reverse across most of its travel at 9 → 0; a full-turn range alone does not guarantee wrapping. Leave this off for ordinary limited-travel position servos.</li>
               <li>Settings → Servos shows every servo's saved pulses at a glance.</li>
             </ul>
@@ -62,7 +62,7 @@
             <p class="help">Sends one pulse to the selected servo above. Works without saved digits and does not change calibration. Changing these fields does not move anything.</p>
             <label class="field">Test pulse (µs) <input id="test-pulse" type="number" value="1500" min="600" max="2400" step="1" inputmode="numeric" required></label>
             <label class="field">Signal duration <select id="test-duration"><option value="500">500 ms</option><option value="1000" selected>1 second</option><option value="2000">2 seconds</option><option value="5000">5 seconds</option></select></label>
-            <button class="wide" id="send-test-pulse" type="submit" disabled>Send test pulse to CH 0</button>
+            <button class="wide" id="send-test-pulse" type="submit">Send test pulse to CH 0</button>
             <p class="help" id="last-signal" role="status">No pulse sent to this port since Counter started.</p>
             <p class="help">A sent pulse confirms the board command, not servo movement. The signal releases when the duration ends. Stop interrupts it immediately. Use pulse limits appropriate for the connected servo.</p>
           </form>

@@ -187,8 +187,11 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
     @app.post("/api/preview")
     def preview():
         data = body(["channel", "pulse_us", "duration_ms"], ["channel", "pulse_us"])
-        controller.preview(data["channel"], data["pulse_us"], data.get("duration_ms"))
-        return state()
+        started = controller.preview(data["channel"], data["pulse_us"], data.get("duration_ms"))
+        result = state().get_json()
+        result["message"] = (f"Test pulse sent to CH {data['channel']}: {data['pulse_us']} µs. Position is not measured."
+                             if started else "Test cancelled by E-stop or a newer command.")
+        return jsonify(result)
 
     @app.get("/api/updates")
     def updates_state():
