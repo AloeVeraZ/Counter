@@ -47,7 +47,7 @@ class AuthWebTests(unittest.TestCase):
         self.assertEqual(self.client.get("/").location, "/login")
         for path in ["/api/state", "/api/updates"]:
             self.assertEqual(self.client.get(path).status_code, 401)
-        for path in ["/api/arm", "/api/stop", "/api/number", "/api/step", "/api/setup",
+        for path in ["/api/arm", "/api/reset-estop", "/api/stop", "/api/number", "/api/step", "/api/setup",
                      "/api/calibration", "/api/preview", "/api/updates", "/api/logout"]:
             self.assertEqual(self.client.post(path, json={}).status_code, 401)
         self.assertFalse(self.counter.armed)

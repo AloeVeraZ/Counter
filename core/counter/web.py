@@ -134,7 +134,8 @@ def create_app(controller, updates=None, *, auth=None, secret_key=None):
                         "instance": token[:12],
                         "installed_commit": getattr(updater, "installed", "")})
 
-    @app.post("/api/arm")
+    @app.post("/api/arm")  # Compatibility for earlier dashboards.
+    @app.post("/api/reset-estop")
     def arm():
         body([])
         controller.arm()

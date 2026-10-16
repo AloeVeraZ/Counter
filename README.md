@@ -62,7 +62,7 @@ Counter's releases live in `/opt/counter/releases`; calibration lives in
 `/var/lib/counter/config.json`, outside the release. The service starts with
 outputs ready to accept commands, after clearing stale PWM. Startup, service
 restarts, and updates do not restore positions or motion. Pass `--start-stopped`
-to the `counter` command to require Start instead.
+to the `counter` command to start with E-stop latched instead.
 
 ```bash
 sudo systemctl status counter
@@ -177,12 +177,11 @@ power disconnect where needed.
 Servos are numbered by their board channel, 0–15; servo 0 is the leftmost digit.
 
 1. In **Calibrate → Your setup**, choose the number of digits (1–16). Save.
-2. Counter starts ready by default (PC simulation previews only). If you have
-   pressed Stop or saved configuration, press **Start** in the top right.
+2. Counter starts ready by default (PC simulation previews only). If E-stop is
+   active, use **Reset E-stop** when the mechanism is clear; resetting sends no movement.
 3. Pick a servo. For each number 0–9, type a pulse in µs or press **−** / **+**
-   (10 µs each) until the number sits in its window. While the servos are on,
-   the pulse boxes are green and the servo moves as soon as you type or press;
-   **Test** moves to the pulse in the box again.
+   (10 µs each), then press that row's **Test** button to try the pulse.
+   Typing, +/−, and accepting a suggestion with Tab do not send movement.
 4. Choose **Save servo N**. Unsaved rows are marked; grey pulses are
    suggestions that are **not saved calibration** until you accept one (press
    **Tab** in an empty box) and save, and the app refuses to show
@@ -205,8 +204,8 @@ to 0. Enable wrapping only after verifying one-step physical movement across
 that boundary in both directions. Leave it off for ordinary limited-travel
 position servos; pulse-end offsets do not make them wrap.
 
-To check the whole build, choose **Display → Test configuration** (press
-**Start** first if outputs were stopped).
+To check the whole build, choose **Display → Test configuration** (reset an
+active E-stop first).
 Each fully calibrated servo, starting with servo 0, counts from 0 up to 9 one
 number at a time, then returns straight to 0 before the next servo begins; the
 preview follows along. This test returns directly to 0 regardless of the wrap
@@ -221,11 +220,12 @@ that servo for editing. The board can't detect whether a servo is plugged in,
 so the list shows which channels are in use. Settings also holds the settle and
 pause timing.
 
-**Start** allows movement commands; it does not itself move a servo. **Stop**,
-beside it in the header, turns the servos off at once. Counter starts ready
-without moving a servo. Stop stays in effect until you explicitly press Start;
-page reloads and signing in do not re-enable outputs. A service restart starts
-ready again, unless launched with `--start-stopped`.
+The header has one **E-stop** control and no Start button. E-stop disables
+signals immediately and latches, changing the same button to **Reset E-stop**.
+Resetting sends no movement. Test, saving, reloading, and signing in cannot
+clear the latch; Escape always stops and never resets. Counter starts ready
+without moving a servo. A service restart starts ready again, unless launched
+with `--start-stopped`. This software control stops signals, not servo power.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 Pulses must stay within **Calibrate → Pulse range**, 600–2400 µs by default.
@@ -294,8 +294,10 @@ Counter confirm that a released mechanism stayed put. These commands require
 a position-controlled servo, not a continuous-rotation servo driven by timing.
 
 Stop interrupts settling and pauses immediately.
-Changing calibration/setup stops outputs. An interrupted move is marked unknown
-and is sent again when requested after enabling control again. To reduce idle
+Changing calibration/setup stops outputs without latching E-stop; the next
+explicit Test or Show can enable signals after validating the command. An
+already latched E-stop remains latched. An interrupted move is marked unknown
+and is sent again only when explicitly requested. To reduce idle
 traffic, the dashboard polls every three seconds with control disabled, every
 second with control enabled, and every half second during movement/counting.
 A hidden, disabled dashboard polls every fifteen seconds; foregrounding it

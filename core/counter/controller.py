@@ -6,12 +6,14 @@ from .config import integer, pulse
 
 
 class Counter:
-    def __init__(self, store, board):
+    def __init__(self, store, board, *, auto_ready=False):
         self.store, self.board = store, board
         self.lock = RLock()
         self.cancel = Event()
         self.worker = None
         self.armed = False
+        self.auto_ready = auto_ready
+        self.estopped = False
         self.busy = False
         self.requested = "0".zfill(store.data["count"])
         self.digits = [None] * 16
@@ -30,6 +32,7 @@ class Counter:
                 self.armed = False
             return {"config": deepcopy(self.store.data), "number": self.requested,
                     "digits": self.digits[:self.store.data["count"]], "armed": self.armed,
+                    "estopped": self.estopped, "ready": board["connected"] and not self.estopped and (self.armed or self.auto_ready),
                     "busy": self.busy, "moving_channel": self.moving_channel, "moving_digit": self.moving_digit,
                     "signals": deepcopy(self.signals[:self.store.data["count"]]),
                     "error": self.error, "board": board, "simulated": self.board.simulated}
@@ -41,12 +44,15 @@ class Counter:
             self.board.enable()
             self.cancel.clear()
             self.armed = True
+            self.estopped = False
             self.error = ""
 
-    def stop(self):
+    def stop(self, *, latch=True):
         with self.lock:
             self.cancel.set()
             self.armed = False
+            if latch:
+                self.estopped = True
             if self.moving_channel is not None:
                 self.digits[self.moving_channel] = None
             self.board.disable()
@@ -57,8 +63,10 @@ class Counter:
     def _ready(self):
         if self.busy:
             raise ValueError("A display is moving. Wait or press Stop.")
-        if not self.armed:
-            raise ValueError("The servos are off. Turn them on in Calibrate first.")
+        if self.estopped:
+            raise ValueError("E-stop is active. Reset E-stop before sending another movement command.")
+        if not self.armed and not self.auto_ready:
+            raise ValueError("Outputs are stopped. Reset E-stop before sending a movement command.")
 
     def show(self, number):
         with self.lock:
@@ -145,6 +153,10 @@ class Counter:
     def _start(self, moves, duration_ms=None):
         if not moves:
             return
+        # Only an explicit, fully validated movement can re-enable signals after
+        # saving settings. A latched E-stop is checked by _ready and never reset here.
+        if not self.armed:
+            self.arm()
         self.cancel.clear()
         self.busy = True
         self.error = ""
@@ -205,7 +217,7 @@ class Counter:
             data = {**deepcopy(self.store.data), **fields}
             from .config import validate
             validate(data)
-            self.stop()
+            self.stop(latch=False)
             self.store.save(data)
             self.requested = "0".zfill(data["count"])
             self.digits = [None] * 16
@@ -232,7 +244,7 @@ class Counter:
             data["positions"][channel] = positions
             from .config import validate
             validate(data)
-            self.stop()
+            self.stop(latch=False)
             self.store.save(data)
             self.digits[channel] = None
 

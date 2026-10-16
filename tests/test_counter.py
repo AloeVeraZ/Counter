@@ -211,6 +211,40 @@ class CounterTests(unittest.TestCase):
         self.addCleanup(restarted.close)
         self.assertEqual(restarted.snapshot()['signals'], [None, None])
 
+    def test_ready_tests_after_save_but_never_reset_a_latched_estop(self):
+        self.counter.auto_ready = True
+        self.counter.calibrate(1, [None] * 10)
+        self.assertTrue(self.counter.snapshot()['ready'])
+        self.assertFalse(self.board.enabled)
+        self.counter.preview(1, 1500)
+        self.finish()
+        self.assertEqual(self.board.commands, [(1, 1500)])
+        self.counter.stop()
+        self.counter.configure({'settle_ms': 1000})
+        self.counter.calibrate(1, [None] * 10)
+        self.assertTrue(self.counter.snapshot()['estopped'])
+        self.assertFalse(self.counter.snapshot()['ready'])
+        with self.assertRaisesRegex(ValueError, 'E-stop is active'):
+            self.counter.preview(1, 1700)
+        self.assertFalse(self.board.enabled)
+        self.assertEqual(self.board.commands, [(1, 1500)])
+        self.counter.arm()  # Explicit E-stop reset clears signals without movement.
+        self.assertFalse(self.counter.snapshot()['estopped'])
+        self.assertEqual(self.board.commands, [(1, 1500)])
+        self.counter.preview(1, 1700)
+        self.finish()
+        self.assertEqual(self.board.commands[-1], (1, 1700))
+
+    def test_ready_mode_validates_whole_command_before_enabling_outputs(self):
+        self.counter.auto_ready = True
+        for command in [lambda: self.counter.preview(1, 5000),
+                        lambda: self.counter.preview(1, 1500, True),
+                        lambda: self.counter.show('42')]:
+            with self.assertRaises(ValueError):
+                command()
+            self.assertFalse(self.board.enabled)
+        self.assertEqual(self.board.commands, [])
+
     def test_single_port_test_rejects_bad_duration_before_writing(self):
         self.counter.arm()
         for duration in [99, 5001, True, '2000', 1000.5]:
@@ -569,6 +603,17 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/arm',json={},headers=headers).status_code,403)
         self.assertEqual(self.post('/api/arm',{}).status_code,200)
         self.assertTrue(self.counter.armed)
+
+    def test_estop_reset_is_explicit_and_never_sends_a_pulse(self):
+        self.counter.auto_ready = True
+        self.assertEqual(self.post('/api/stop', {}).status_code, 200)
+        self.assertEqual(self.post('/api/preview', {'channel': 1, 'pulse_us': 1500}).status_code, 400)
+        self.assertEqual(self.client.post('/api/reset-estop', json={}).status_code, 403)
+        self.assertTrue(self.client.get('/api/state').get_json()['estopped'])
+        self.assertEqual(self.post('/api/reset-estop', {}).status_code, 200)
+        self.assertFalse(self.client.get('/api/state').get_json()['estopped'])
+        self.assertTrue(self.counter.board.enabled)
+        self.assertEqual(self.counter.board.pulses, {})
 
     def test_calibration_setup_and_invalid_payloads(self):
         self.assertEqual(self.post('/api/calibration',{'channel':0,'positions':[1500]*10}).status_code,200)

@@ -14,7 +14,7 @@ from .auth import PiPasswordAuth, session_key
 def main():
     parser = argparse.ArgumentParser(description="Counter mechanical digit dashboard")
     parser.add_argument("--simulate", action="store_true", help="Preview without a Raspberry Pi or servos")
-    parser.add_argument("--start-stopped", action="store_true", help="Require Start before accepting movement commands")
+    parser.add_argument("--start-stopped", action="store_true", help="Start with E-stop latched until explicitly reset")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, action="append", help="Listen port; repeat to serve several (default 8080)")
     parser.add_argument("--config", type=Path, default=Path(os.environ.get("COUNTER_CONFIG", str(Path.home() / ".counter" / "config.json"))))
@@ -23,7 +23,7 @@ def main():
     auth = None if args.simulate else PiPasswordAuth(os.environ.get("COUNTER_LOGIN_USER", getpass.getuser()))
     key = None if args.simulate else session_key(args.config.with_name("session.key"))
     store = ConfigStore(args.config)
-    controller = Counter(store, SimulatedBoard() if args.simulate else PCA9685())
+    controller = Counter(store, SimulatedBoard() if args.simulate else PCA9685(), auto_ready=not args.start_stopped)
     atexit.register(controller.close)
 
     def shutdown(signum, frame):
@@ -41,6 +41,8 @@ def main():
         except (RuntimeError, OSError) as error:
             controller.stop()
             controller.error = f"Could not start outputs: {error}"
+    else:
+        controller.stop()
     from waitress import serve
     urls = ", ".join(f"http://{args.host}:{port}" for port in ports)
     print(f"Counter at {urls} · {'SIMULATION' if args.simulate else 'PCA9685 hardware'}", flush=True)

@@ -13,7 +13,7 @@
 <header class="topbar">
   <a class="brand" href="/" aria-label="Counter home"><span class="brand-mark" aria-hidden="true">C<span>_</span></span> COUNTER <small>v{{ version }}</small></a>
   <nav aria-label="Workspace"><button class="tab active" data-view="display" aria-current="page">Display</button><button class="tab" data-view="calibration">Calibrate</button><button class="tab" data-view="system">Settings</button></nav>
-  <div class="tools"><span id="connection" class="status">Connecting</span><button id="theme" class="theme" aria-label="Toggle light theme">◐</button>{% if login_required %}<button id="logout">Sign out</button>{% endif %}<button class="start" id="arm" title="Turn on the servos">Start</button><button class="danger" id="stop" title="Turn off the servos">Stop</button></div>
+  <div class="tools"><span id="connection" class="status">Connecting</span><button id="theme" class="theme" aria-label="Toggle light theme">◐</button>{% if login_required %}<button id="logout">Sign out</button>{% endif %}<button class="danger" id="stop" title="Disable servo signals immediately" aria-pressed="false">E-stop</button></div>
 </header>
 <main>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
@@ -21,14 +21,14 @@
   <section data-page="display">
     <div class="hero"><div><p class="eyebrow">RASPBERRY PI / MECHANICAL DIGIT DISPLAY</p><h1>Make numbers move.</h1><p>The number on the mechanical display, updated live.</p></div><span class="pill" id="mode">PCA9685 · 16 channels</span></div>
     <section class="panel preview-panel"><div class="panel-head"><h2>Display preview</h2><span id="movement" class="status">Stopped</span></div><div class="preview-stage"><div id="digits" class="digits" aria-label="Requested number"></div></div><div class="preview-footer"><span><i class="blue-dot"></i> <span id="display-count">2</span> configured displays</span><span>Left to right → CH 0–<span id="last-channel">1</span></span></div><p class="caption">Shows the number currently commanded; servo positions are not measured. Numbers are set from Calibration for testing until a database source supplies them.</p></section>
-    <section class="panel test-panel"><div class="test-copy"><h2>Test configuration</h2><p class="help">Counts each servo in turn, starting with servo 0: from 0 up to 9, then straight back to 0, then on to the next. Press Start first. Stop ends it at any time.</p></div><button class="primary" id="test-sequence">Test configuration</button></section>
+    <section class="panel test-panel"><div class="test-copy"><h2>Test configuration</h2><p class="help">Counts each servo in turn, starting with servo 0: from 0 up to 9, then straight back to 0, then on to the next. E-stop ends it at any time.</p></div><button class="primary" id="test-sequence">Test configuration</button></section>
   </section>
   </section>
 
   <section data-page="calibration" hidden>
     <div class="hero"><div><p class="eyebrow">CALIBRATION / ONE PULSE PER NUMBER</p><h1>Find every number.</h1><p>Set where each servo stops for 0–9, then try a number.</p></div></div>
     <section class="panel control-bar">
-      <div class="control-copy"><strong id="control-title">Servos are off</strong><p id="control-help">Turn them on to move the displays while you calibrate.</p></div>
+      <div class="control-copy"><strong id="control-title">Checking controls</strong><p id="control-help">Edit pulses, then press Test to move the selected servo.</p></div>
       <div class="control-ready"><span>Displays ready</span><strong id="calibrated">0 of 2</strong><div class="meter"><div id="calibration-progress"></div></div></div>
     </section>
     <div class="workspace">
@@ -38,17 +38,17 @@
           <p class="step-label">1 · Choose a servo (board channel 0–15)</p>
           <div id="display-picker" class="display-picker" role="group" aria-label="Servo to calibrate"></div>
           <label class="checkbox wrap-toggle"><input type="checkbox" id="wrap-servo"><span><strong>Servo <span id="wrap-name">0</span> wraps around</strong><small>Only enable after verifying that the hardware moves between 9 and 0 by one physical step in both directions. This changes the digit order; it cannot add travel, change the servo's mode, or control which way the servo turns.</small></span></label>
-          <p class="step-label">2 · Type a pulse or press − / + until each number sits in its window</p>
+          <p class="step-label">2 · Edit a pulse with typing or − / +, then press Test to try it</p>
           <div id="calibration-rows" class="calibration-rows"></div>
                     <button class="primary wide" id="save-calibration">Save servo 0</button>
           <button class="link" id="copy-calibration" type="button">Same kind of servos? Copy servo 0 to the others</button>
           <details class="more"><summary>Tips</summary>
             <ul class="tips">
               <li>Each servo keeps its own pulse for every number, so different servos can be set differently.</li>
-              <li>While the servos are on (after Start), typing a pulse or pressing − / + moves the servo straight there. Test moves it to the pulse in the box again.</li>
+              <li>Typing a pulse, pressing − / +, or accepting a suggestion only edits the draft. Press that row's Test button to move the servo.</li>
               <li>Grey pulses are suggestions for numbers you haven't set. Click an empty box and press Tab to use the suggestion. Nothing is saved until you press Save.</li>
               <li>Go gently near the ends of travel, and stop if the mechanism hits its limit.</li>
-              <li>Saving turns the servos off. Press Start again for the next servo.</li>
+              <li>Saving sends no movement. The next Test works without a Start button. An active E-stop must be explicitly reset first.</li>
               <li>Wraps around chooses the shorter sequence of saved digits, forward on a tie. A position servo can still reverse across most of its travel at 9 → 0; a full-turn range alone does not guarantee wrapping. Leave this off for ordinary limited-travel position servos.</li>
               <li>Settings → Servos shows every servo's saved pulses at a glance.</li>
             </ul>

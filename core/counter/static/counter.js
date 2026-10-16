@@ -1,7 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
-let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, previewTimer = null, draft = [], servoSignature = '', lastShown = [];
+let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, draft = [], servoSignature = '', lastShown = [];
+function canMove() { return state?.ready ?? state?.armed ?? false; }
 const NUDGE = 10;
 // The configured pulse range (Calibrate → Pulse range), within the board's fixed 300–4000 µs envelope.
 function pulseMin() { return state?.config.min_pulse ?? 600; }
@@ -51,16 +52,10 @@ function refreshCalibrationStatus() {
   $('copy-calibration').textContent = `Same kind of servos? Copy servo ${calChannel} to the others`;
   $('copy-calibration').hidden = (state?.config.count || 1) < 2;
 }
-// Move to the latest − / + value once the previous move has finished, so quick taps do not pile up.
-function previewSoon(channel, width, delay = 200) {
-  clearTimeout(previewTimer);
-  const attempt = () => { if (!state?.armed) return; if (state.busy || requestPending) { previewTimer = setTimeout(attempt, 250); return; } command('/api/preview', {channel, pulse_us: width}).catch(() => {}); };
-  previewTimer = setTimeout(attempt, delay);
-}
 function selectDisplay(channel) {
   if (channel === calChannel) return true;
   if (unsavedCount() && !window.confirm(`Servo ${calChannel} has unsaved changes. Discard them?`)) return false;
-  setAuto(false); clearTimeout(previewTimer); calChannel = channel; pickerSignature = ''; calibrationRows(true); renderPicker(); renderPulseTest();
+  setAuto(false);  calChannel = channel; pickerSignature = ''; calibrationRows(true); renderPicker(); renderPulseTest();
   return true;
 }
 function calibrationRows(force = false) {
@@ -78,20 +73,16 @@ function calibrationRows(force = false) {
     input.setAttribute('aria-label', `Pulse for number ${digit} on servo ${channel}, in microseconds. Press Tab in an empty box to use the suggested ${suggested}.`);
     input.addEventListener('input', () => {
       const text = input.value.trim(); draft[digit] = text ? Number(text) : null; refreshCalibrationStatus();
-      const width = Number(text);
-      if (state.armed && text && Number.isInteger(width) && width >= pulseMin() && width <= pulseMax()) previewSoon(channel, width, 450);
     });
     // Tab in an empty box accepts the grey suggestion as this number's unsaved pulse.
     input.addEventListener('keydown', event => {
       if (event.key !== 'Tab' || input.value.trim()) return;
       input.value = suggested; draft[digit] = suggested; refreshCalibrationStatus();
-      if (state.armed) previewSoon(channel, suggested);
     });
     input.addEventListener('change', () => { if (input.value.trim()) { draft[digit] = clampPulse(Number(input.value)); input.value = draft[digit]; refreshCalibrationStatus(); } });
     const nudge = direction => {
       const width = clampPulse((draft[digit] ?? suggested) + direction * NUDGE);
       draft[digit] = width; input.value = width; refreshCalibrationStatus();
-      if (state.armed) previewSoon(channel, width); else notice('Press Start at the top to see it move.');
     };
     const minus = element('button', 'nudge', '−'); minus.setAttribute('aria-label', `Lower the pulse for number ${digit}`); minus.addEventListener('click', () => nudge(-1));
     const plus = element('button', 'nudge', '+'); plus.setAttribute('aria-label', `Raise the pulse for number ${digit}`); plus.addEventListener('click', () => nudge(1));
@@ -127,7 +118,7 @@ function renderPicker() {
 function renderPulseTest() {
   $('test-port').textContent = `CH ${calChannel}`;
   $('send-test-pulse').textContent = `Send test pulse to CH ${calChannel}`;
-  $('send-test-pulse').disabled = !state.armed || state.busy;
+  $('send-test-pulse').disabled = !canMove() || state.busy || !state.board.connected;
   const input = $('test-pulse'); input.min = pulseMin(); input.max = pulseMax();
   const signal = state.signals?.[calChannel];
   const status = {active:'PWM active', released:'PWM released', interrupted:'Interrupted', failed:'Board command failed'};
@@ -182,22 +173,21 @@ function render(value) {
   $('connection').textContent = value.simulated ? 'Preview on this PC' : value.board.connected ? 'Board connected' : 'Board offline';
   $('connection').className = `status ${value.board.connected ? 'good' : 'bad'}`;
   $('mode').textContent = value.simulated ? 'SIMULATION · NO HARDWARE' : 'PCA9685 · 16 channels';
-  $('movement').textContent = value.busy ? value.moving_channel === null ? 'Pausing between moves' : `Moving servo ${value.moving_channel}` : value.armed ? 'Servos on' : 'Servos off';
-  $('movement').className = `status ${value.armed ? 'good' : ''}`;
-  // One button turns the servos on to test and off again; Stop in the header always turns them off.
-  $('control-title').textContent = value.armed ? 'Servos are on' : 'Servos are off';
+  $('movement').textContent = value.busy ? value.moving_channel === null ? 'Pausing between moves' : `Moving servo ${value.moving_channel}` : value.estopped ? 'E-stop active' : canMove() ? 'Ready' : 'Outputs stopped';
+  $('movement').className = `status ${canMove() ? 'good' : ''}`;
+  $('control-title').textContent = value.estopped ? 'E-stop active' : canMove() ? 'Ready to test' : 'Outputs stopped';
   $('control-help').textContent = !value.board.connected && !value.simulated ? 'The servo board is offline. Check Settings → Servo board.'
-    : value.armed ? `Servos move when you type a pulse, press − / +, Test, or Show. Press Stop when you finish.${value.simulated ? ' (Preview only: no real servos.)' : ''}`
-    : `Press Start at the top to move the servos while you calibrate.${value.simulated ? ' This PC preview moves no real servos.' : ''}`;
-  // Start and Stop sit together in the header; Stop always works, Start only when the board is ready.
-  document.querySelector('.control-bar').classList.toggle('on', value.armed);
-  document.body.classList.toggle('servos-on', value.armed);
-  $('arm').disabled = value.armed || value.busy || !value.board.connected;
-  $('arm').textContent = value.armed ? 'Started' : 'Start';
-  $('show-number').disabled = !value.armed || value.busy;
-  document.querySelectorAll('[data-step]').forEach(button => {button.disabled = !value.armed || value.busy;});
-  $('zero').disabled = !value.armed || value.busy;
-  $('auto').disabled = !value.armed;
+    : value.estopped ? 'Movement is blocked. Reset E-stop using the same button when the mechanism is clear. Resetting does not move a servo.'
+    : `Edit pulses freely, then press Test to move the selected servo. Typing, − / +, and Tab send no movement.${value.simulated ? ' (Preview only: no real servos.)' : ''}`;
+  document.querySelector('.control-bar').classList.toggle('on', canMove());
+  document.body.classList.toggle('servos-on', canMove());
+  $('stop').textContent = value.estopped ? 'Reset E-stop' : 'E-stop';
+  $('stop').setAttribute('aria-pressed', String(Boolean(value.estopped)));
+  $('stop').title = value.estopped ? 'Reset the stop latch without moving any servo' : 'Disable servo signals immediately';
+  $('show-number').disabled = !canMove() || value.busy;
+  document.querySelectorAll('[data-step]').forEach(button => {button.disabled = !canMove() || value.busy;});
+  $('zero').disabled = !canMove() || value.busy;
+  $('auto').disabled = !canMove();
   if (!value.armed) setAuto(false);
   $('calibrated').textContent = `${ready} of ${count}`;
   $('calibration-progress').style.width = `${100 * ready / count}%`;
@@ -238,9 +228,9 @@ function render(value) {
   renderPicker();
   renderPulseTest();
   renderServoTable();
-  document.querySelectorAll('.test').forEach(button=>{button.disabled=!value.armed || value.busy;});
+  document.querySelectorAll('.test').forEach(button=>{button.disabled=!canMove() || value.busy || !value.board.connected;});
   $('save-calibration').disabled = $('copy-calibration').disabled = value.busy;
-  $('test-sequence').disabled = !value.armed || value.busy;
+  $('test-sequence').disabled = !canMove() || value.busy || !value.board.connected;
   $('test-sequence').textContent = value.busy && value.armed ? 'Testing…' : 'Test configuration';
   $('board-connected').textContent = value.simulated ? 'PREVIEW' : value.board.connected ? 'CONNECTED' : 'OFFLINE';
   $('board-connected').className = `pill ${value.board.connected ? 'good' : 'bad'}`;
@@ -251,22 +241,22 @@ function render(value) {
   if (value.error) notice(value.error,true);
 }
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>view(button.dataset.view)));
-$('arm').addEventListener('click',run(()=>command('/api/arm',{},'Servos are on. Type a pulse, press − / +, or Test to move a servo.')));
-$('stop').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);return command('/api/stop',{},'Stopped. Servos are off.');}));
+function emergencyStop(){setAuto(false);return command('/api/stop',{},'E-stop active. Servo signals are disabled.');}
+$('stop').addEventListener('click',run(()=>state?.estopped ? command('/api/reset-estop',{},'E-stop reset. Press Test or Show to move; resetting sends no movement.') : emergencyStop()));
 if ($('logout')) $('logout').addEventListener('click',run(async()=>{setAuto(false);await command('/api/logout',{});window.location.assign('/login');}));
 $('number-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/number',{number:$('number').value.trim()}))();});
 document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/step',{delta:Number(button.dataset.step)});$('number').value=result.number;})));
 $('zero').addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/number',{number:'0'});$('number').value=result.number;}));
 $('auto').addEventListener('click',()=>setAuto(!auto));
 $('wrap-servo').addEventListener('change',run(()=>{const channel=calChannel,enabled=$('wrap-servo').checked;return command('/api/wrap',{channel,enabled},enabled?`Servo ${channel}: 9 and 0 are now neighbouring digits. Physical wrapping depends on the hardware.`:`Servo ${channel} no longer wraps.`).catch(error=>{$('wrap-servo').checked=!enabled;throw error;});}));
-$('test-sequence').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);return command('/api/test-sequence',{});}));
+$('test-sequence').addEventListener('click',run(()=>{setAuto(false);return command('/api/test-sequence',{});}));
 $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number($('interval').value);});
-$('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Servos are off.'))();});
-$('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved. Servos are off.'))();});
-$('range-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);clearTimeout(previewTimer);run(()=>command('/api/setup',{min_pulse:Number($('min-pulse').value),max_pulse:Number($('max-pulse').value)},'Pulse range saved. Servos are off.').then(()=>calibrationRows(true)))();});
-$('pulse-test-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);clearTimeout(previewTimer);const channel=calChannel;run(()=>command('/api/preview',{channel,pulse_us:Number($('test-pulse').value),duration_ms:Number($('test-duration').value)},`Test pulse sent to CH ${channel}. Check the servo physically; position is not measured.`))();});
+$('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Press Test to try a pulse.'))();});
+$('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved.'))();});
+$('range-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/setup',{min_pulse:Number($('min-pulse').value),max_pulse:Number($('max-pulse').value)},'Pulse range saved. Press Test to try a pulse.').then(()=>calibrationRows(true)))();});
+$('pulse-test-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);const channel=calChannel;run(()=>command('/api/preview',{channel,pulse_us:Number($('test-pulse').value),duration_ms:Number($('test-duration').value)},`Test pulse sent to CH ${channel}. Check the servo physically; position is not measured.`))();});
 $('gobilda-torque-range').addEventListener('click',()=>{$('min-pulse').value=500;$('max-pulse').value=2500;notice('500–2500 µs filled for goBILDA 2000-0025-0002 position mode (300°). Check all connected servos, then Save range. Nothing saved or moved.');});
-$('save-calibration').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Servo ${channel} saved. Servos are off.`).then(()=>calibrationRows(true));}));
+$('save-calibration').addEventListener('click',run(()=>{setAuto(false);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Servo ${channel} saved. Press Test to try a pulse.`).then(()=>calibrationRows(true));}));
 // For identical servos: copy one servo's saved pulses to the others, then fine-tune any that differ.
 $('copy-calibration').addEventListener('click',run(async()=>{
   const source=calChannel, count=state.config.count, saved=state.config.positions[source].slice();
@@ -274,7 +264,7 @@ $('copy-calibration').addEventListener('click',run(async()=>{
   const extra=unsavedCount()?' Unsaved changes on this servo are not copied.':'';
   const others=Array.from({length:count},(_,channel)=>channel).filter(channel=>channel!==source).join(', ');
   if(!window.confirm(`Copy servo ${source}'s saved pulses to servo${count===2?'':'s'} ${others}? Their saved pulses and wrap-around setting will be replaced.${extra}`))return;
-  setAuto(false);clearTimeout(previewTimer);
+  setAuto(false);
   const wraps=state.config.wrap[source];
   for(let channel=0;channel<count;channel++){if(channel===source)continue;await command('/api/calibration',{channel,positions:saved});if(state.config.wrap[channel]!==wraps)await command('/api/wrap',{channel,enabled:wraps});}
   notice(`Copied servo ${source} to the others. Check each one and fine-tune any that look off.`);
@@ -415,7 +405,7 @@ $('update').addEventListener('click',()=>{
 $('theme').addEventListener('click',()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;$('theme').setAttribute('aria-label',`Toggle ${theme==='dark'?'light':'dark'} theme`);try{localStorage.setItem('counter-theme',theme);}catch{}});
 try{if(localStorage.getItem('counter-theme')==='light')document.documentElement.dataset.theme='light';}catch{}
 document.addEventListener('visibilitychange',()=>{if(document.hidden)setAuto(false);if(!ticking)schedulePoll(document.hidden?pollDelay():0);});
-document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!updateWatch&&!$('update-password-dialog')?.open)$('stop').click();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!updateWatch&&!$('update-password-dialog')?.open)run(emergencyStop)();});
 async function tick(){
   if(ticking||updateWatch)return;ticking=true;
   try{
@@ -425,7 +415,7 @@ async function tick(){
       else if(nextCount===null)nextCount=Date.now()+Number($('interval').value);
       else if(Date.now()>=nextCount){nextCount=null;const response=await command('/api/step',{delta:1});$('number').value=response.number;}
     }
-  }catch(error){setAuto(false);$('connection').textContent='Disconnected';$('connection').className='status bad';$('arm').disabled=$('show-number').disabled=true;notice(error.message||'Can’t reach Counter. Counting is paused.',true);}
+  }catch(error){setAuto(false);$('connection').textContent='Disconnected';$('connection').className='status bad';$('show-number').disabled=$('send-test-pulse').disabled=true;document.querySelectorAll('.test').forEach(button=>{button.disabled=true;});notice(error.message||'Can’t reach Counter. Counting is paused.',true);}
   finally{ticking=false;schedulePoll(pollDelay());}
 }
 tick();
