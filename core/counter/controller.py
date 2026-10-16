@@ -2,20 +2,26 @@
 from copy import deepcopy
 import re
 from threading import Event, RLock, Thread
-from .config import integer, pulse
+from .config import integer, channel_pulse, channel_spec
 
 
 class Counter:
-    def __init__(self, store, board):
+    def __init__(self, store, board, *, auto_ready=False):
         self.store, self.board = store, board
         self.lock = RLock()
         self.cancel = Event()
         self.worker = None
+        self.motion_revision = 0
         self.armed = False
+        self.auto_ready = auto_ready
+        self.estopped = False
         self.busy = False
         self.requested = "0".zfill(store.data["count"])
         self.digits = [None] * 16
         self.moving_channel = None
+        self.moving_digit = None
+        # Command history only, never measured positions or saved calibration.
+        self.signals = [None] * 16
         self.error = ""
         self.board.disable()
 
@@ -26,8 +32,11 @@ class Counter:
                 self.cancel.set()
                 self.armed = False
             return {"config": deepcopy(self.store.data), "number": self.requested,
+                    "servo_specs": [channel_spec(channel, self.store.data) for channel in range(16)],
                     "digits": self.digits[:self.store.data["count"]], "armed": self.armed,
-                    "busy": self.busy, "moving_channel": self.moving_channel,
+                    "estopped": self.estopped, "ready": board["connected"] and not self.estopped and (self.armed or self.auto_ready),
+                    "busy": self.busy, "moving_channel": self.moving_channel, "moving_digit": self.moving_digit,
+                    "signals": deepcopy(self.signals[:self.store.data["count"]]),
                     "error": self.error, "board": board, "simulated": self.board.simulated}
 
     def arm(self):
@@ -37,21 +46,30 @@ class Counter:
             self.board.enable()
             self.cancel.clear()
             self.armed = True
+            self.estopped = False
             self.error = ""
 
-    def stop(self):
+    def stop(self, *, latch=True):
         with self.lock:
+            self.motion_revision += 1
             self.cancel.set()
             self.armed = False
+            if latch:
+                self.estopped = True
             if self.moving_channel is not None:
                 self.digits[self.moving_channel] = None
             self.board.disable()
+            for signal in self.signals:
+                if signal and signal["status"] == "active":
+                    signal["status"] = "interrupted"
 
-    def _ready(self):
+    def _ready(self, *, allow_stopped=False):
         if self.busy:
             raise ValueError("A display is moving. Wait or press Stop.")
-        if not self.armed:
-            raise ValueError("Servo control is disabled. Enable servo control before moving a display.")
+        if self.estopped and not allow_stopped:
+            raise ValueError("Outputs are stopped. Press a calibration Test to send a new position.")
+        if not self.armed and not self.auto_ready and not allow_stopped:
+            raise ValueError("Outputs are stopped. Press a calibration Test to send a new position.")
 
     def show(self, number):
         with self.lock:
@@ -69,6 +87,13 @@ class Counter:
                 if current is None:
                     # No encoder: the first explicit command establishes a reference.
                     ticks = [target]
+                elif self.store.data["wrap"][channel]:
+                    # A wrapping wheel treats 9 and 0 as neighbours: take the shorter way round,
+                    # forward on a tie, still one number per move.
+                    previous = int(current)
+                    forward, backward = (target - previous) % 10, (previous - target) % 10
+                    direction, steps = (1, forward) if forward <= backward else (-1, backward)
+                    ticks = [(previous + direction * step) % 10 for step in range(1, steps + 1)]
                 else:
                     previous = int(current)
                     direction = 1 if target > previous else -1
@@ -76,10 +101,10 @@ class Counter:
                 for tick in ticks:
                     width = self.store.data["positions"][channel][tick]
                     if width is None:
-                        raise ValueError(f"Calibrate digit {tick} on channel {channel} first.")
+                        raise ValueError(f"Number {tick} isn't set on servo {channel} yet. Set it in Calibrate first.")
                     moves.append((channel, width, str(tick)))
-            self.requested = number
             self._start(moves)
+            self.requested = number
 
     def step(self, delta):
         integer(delta, -10000, 10000, "Step")
@@ -89,20 +114,72 @@ class Counter:
                 raise ValueError("That step exceeds the display range.")
             self.show(str(value))
 
-    def preview(self, channel, width):
-        with self.lock:
-            self._ready()
-            integer(channel, 0, self.store.data["count"] - 1, "Channel")
-            pulse(width)
-            self._start([(channel, width, None)])
+    def test_sequence(self):
+        """Count each fully calibrated servo, one after another, from 0 up to 9, then snap back to 0.
 
-    def _start(self, moves):
+        The whole path is planned and validated before anything moves. Counting up
+        visits every number; the return to 0 (and the first move to 0) is one move,
+        the owner's chosen exception to stepping through neighbours, since 0 is the
+        mechanism's starting position. Servos without all ten numbers are skipped.
+        """
+        with self.lock:
+            self._ready(allow_stopped=True)
+            count = self.store.data["count"]
+            positions = self.store.data["positions"]
+            tested = [channel for channel in range(count) if None not in positions[channel]]
+            skipped = [channel for channel in range(count) if channel not in tested]
+            if not tested:
+                raise ValueError("Set all ten numbers on at least one servo in Calibrate before testing.")
+            moves = []
+            requested = list(self.requested.zfill(count))
+            for channel in tested:
+                start = [] if self.digits[channel] == "0" else [0]
+                path = start + list(range(1, 10)) + [0]
+                moves += [(channel, positions[channel][tick], str(tick)) for tick in path]
+                requested[channel] = "0"
+            self._start(moves)
+            self.requested = "".join(requested)
+            return tested, skipped
+
+    def preview(self, channel, width, duration_ms=None):
+        with self.lock:
+            integer(channel, 0, self.store.data["count"] - 1, "Channel")
+            channel_pulse(channel, width, self.store.data)
+            if duration_ms is not None:
+                integer(duration_ms, 100, 5000, "Test signal duration (ms)")
+            # A Test is an explicit movement request, including after E-stop.
+            # Cancel the previous move before replacing it; never queue positions.
+            self.stop(latch=False)
+            revision, previous = self.motion_revision, self.worker
+        if previous is not None and previous.is_alive():
+            previous.join(timeout=2)
+        with self.lock:
+            # E-stop, a newer Test, or another command during cancellation wins.
+            if revision != self.motion_revision:
+                return False
+            if self.busy:
+                raise ValueError("The previous move has not stopped yet. Press E-stop and retry Test.")
+            self.arm()
+            self._start([(channel, width, None)], duration_ms)
+            return True
+
+    def _start(self, moves, duration_ms=None):
         if not moves:
             return
+        # Validate every channel before enabling outputs or sending the first move,
+        # including retained calibration from before the channel-0 servo change.
+        for channel, width, _ in moves:
+            channel_pulse(channel, width, self.store.data)
+        self.motion_revision += 1
+        # Re-enable only for the explicit movement validated by the caller.
+        if not self.armed:
+            self.arm()
         self.cancel.clear()
         self.busy = True
         self.error = ""
         settings = deepcopy(self.store.data)
+        if duration_ms is not None:
+            settings["settle_ms"] = duration_ms
         self.worker = Thread(target=self._move, args=(moves, settings), name="counter-servo", daemon=True)
         self.worker.start()
 
@@ -112,9 +189,10 @@ class Counter:
                 with self.lock:
                     if self.cancel.is_set():
                         break
-                    self.moving_channel = channel
+                    self.moving_channel, self.moving_digit = channel, digit
                     self.digits[channel] = None
                     self.board.write(channel, width)
+                    self.signals[channel] = {"pulse_us": width, "duration_ms": settings["settle_ms"], "status": "active"}
                 if self.cancel.wait(settings["settle_ms"] / 1000):
                     break
                 with self.lock:
@@ -122,13 +200,16 @@ class Counter:
                         break
                     # One active PWM channel, including between ticks on the same servo.
                     self.board.release(channel)
+                    self.signals[channel]["status"] = "released"
                     self.digits[channel] = digit
-                    self.moving_channel = None
+                    self.moving_channel = self.moving_digit = None
                 if index < len(moves) - 1 and self.cancel.wait(settings["pause_ms"] / 1000):
                     break
         except Exception as error:
             with self.lock:
                 self.error = f"Movement failed: {error}"
+                if self.moving_channel is not None:
+                    self.signals[self.moving_channel] = {"pulse_us": width, "duration_ms": settings["settle_ms"], "status": "failed"}
                 self.armed = False
                 self.cancel.set()
                 try:
@@ -137,22 +218,37 @@ class Counter:
                     self.error += f"; output disable failed: {stop_error}"
         finally:
             with self.lock:
+                if self.moving_channel is not None:
+                    signal = self.signals[self.moving_channel]
+                    if signal and signal["status"] == "active":
+                        signal["status"] = "interrupted"
                 self.busy = False
-                self.moving_channel = None
+                self.moving_channel = self.moving_digit = None
 
     def configure(self, fields):
         with self.lock:
             if self.busy:
                 raise ValueError("Stop movement and wait before changing configuration.")
-            if not isinstance(fields, dict) or not fields or set(fields) - {"count", "settle_ms", "pause_ms", "release_after_move"}:
+            if not isinstance(fields, dict) or not fields or set(fields) - {"count", "settle_ms", "pause_ms", "release_after_move", "min_pulse", "max_pulse"}:
                 raise ValueError("Unknown or missing setup fields.")
             data = {**deepcopy(self.store.data), **fields}
             from .config import validate
             validate(data)
-            self.stop()
+            self.stop(latch=False)
             self.store.save(data)
             self.requested = "0".zfill(data["count"])
             self.digits = [None] * 16
+
+    def set_wrap(self, channel, enabled):
+        with self.lock:
+            if self.busy:
+                raise ValueError("Wait for the movement to finish before changing wrap-around.")
+            integer(channel, 0, 15, "Channel")
+            if type(enabled) is not bool:
+                raise ValueError("Wrap-around must be on or off.")
+            data = deepcopy(self.store.data)
+            data["wrap"][channel] = enabled
+            self.store.save(data)
 
     def calibrate(self, channel, positions):
         with self.lock:
@@ -163,10 +259,12 @@ class Counter:
                 raise ValueError("Supply ten digit positions.")
             for width in positions:
                 if width is not None:
-                    pulse(width)
+                    channel_pulse(channel, width, self.store.data)
             data = deepcopy(self.store.data)
             data["positions"][channel] = positions
-            self.stop()
+            from .config import validate
+            validate(data)
+            self.stop(latch=False)
             self.store.save(data)
             self.digits[channel] = None
 

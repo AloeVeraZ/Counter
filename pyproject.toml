@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 dependencies = ["Flask>=3.1,<4", "waitress>=3,<4"]
 
 [project.optional-dependencies]
-pi = ["smbus2>=0.5,<1", "gpiozero>=2,<3", "lgpio>=0.2,<1"]
+pi = ["smbus2>=0.5,<1", "gpiozero>=2.0.1.post3,<3", "lgpio>=0.2,<1", "python-pam>=2.1,<3"]
 
 [project.scripts]
 counter = "counter.__main__:main"
@@ -20,4 +20,4 @@ counter = "counter.__main__:main"
 where = ["core"]
 
 [tool.setuptools.package-data]
-counter = ["templates/*.html", "static/*.css", "static/*.js", "static/fonts/*"]
+counter = ["templates/*.html", "static/*.css", "static/*.js", "static/*.svg", "static/fonts/*"]
