@@ -138,7 +138,7 @@ for pi_address in $(hostname -I); do
   [[ $pi_address == *:* ]] && continue
   echo "Counter IP: http://$pi_address"
 done
-echo 'Outputs start stopped. Calibration is kept in /var/lib/counter/config.json (copy from before this install: config.before-update.json).'
+echo 'Counter starts ready for commands without moving servos. Calibration is kept in /var/lib/counter/config.json (copy from before this install: config.before-update.json).'
 echo "After boot, open the Pi's current IP address in a browser and enter the Pi password for $install_user."
 if [[ -z $previous ]]; then
   echo 'Initial install succeeded. Rebooting the Pi now; reconnect after it boots.'

@@ -5,7 +5,7 @@
 - This project controls one PCA9685, up to 16 decimal digit modules, and no DC motors.
 - Keep the control wiring: physical Pi pins 1 VCC, 3 SDA, 5 SCL, 7 OE / BCM4, 9 GND.
 - Hardware mode must never silently fall back to simulation.
-- Start with OE disabled; never restore motion automatically after a restart.
+- Initialize with OE disabled and clear stale PWM, then start ready to accept commands by default (owner-requested exception). Never restore positions or motion automatically after a restart. Stop remains stopped until explicitly started again; `--start-stopped` disables the startup-ready default.
 - Keep calibration outside installed releases. Never invent saved positions.
 - Numbers are decimal strings, including sixteen-digit values and leading zeros.
 - Keep movements interruptible and sequential. Stop must disable OE immediately.

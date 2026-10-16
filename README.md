@@ -60,7 +60,9 @@ for syntax, but has not been executed on a physical Pi in this development run.
 
 Counter's releases live in `/opt/counter/releases`; calibration lives in
 `/var/lib/counter/config.json`, outside the release. The service starts with
-outputs stopped. Startup, service restarts, and updates do not restore motion.
+outputs ready to accept commands, after clearing stale PWM. Startup, service
+restarts, and updates do not restore positions or motion. Pass `--start-stopped`
+to the `counter` command to require Start instead.
 
 ```bash
 sudo systemctl status counter
@@ -175,7 +177,8 @@ power disconnect where needed.
 Servos are numbered by their board channel, 0–15; servo 0 is the leftmost digit.
 
 1. In **Calibrate → Your setup**, choose the number of digits (1–16). Save.
-2. Press **Start** in the top right (it previews only in PC simulation).
+2. Counter starts ready by default (PC simulation previews only). If you have
+   pressed Stop or saved configuration, press **Start** in the top right.
 3. Pick a servo. For each number 0–9, type a pulse in µs or press **−** / **+**
    (10 µs each) until the number sits in its window. While the servos are on,
    the pulse boxes are green and the servo moves as soon as you type or press;
@@ -202,7 +205,8 @@ to 0. Enable wrapping only after verifying one-step physical movement across
 that boundary in both directions. Leave it off for ordinary limited-travel
 position servos; pulse-end offsets do not make them wrap.
 
-To check the whole build, press **Start**, then **Display → Test configuration**.
+To check the whole build, choose **Display → Test configuration** (press
+**Start** first if outputs were stopped).
 Each fully calibrated servo, starting with servo 0, counts from 0 up to 9 one
 number at a time, then returns straight to 0 before the next servo begins; the
 preview follows along. This test returns directly to 0 regardless of the wrap
@@ -218,8 +222,10 @@ so the list shows which channels are in use. Settings also holds the settle and
 pause timing.
 
 **Start** allows movement commands; it does not itself move a servo. **Stop**,
-beside it in the header, turns the servos off at once. Nothing turns itself on
-at startup.
+beside it in the header, turns the servos off at once. Counter starts ready
+without moving a servo. Stop stays in effect until you explicitly press Start;
+page reloads and signing in do not re-enable outputs. A service restart starts
+ready again, unless launched with `--start-stopped`.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 Pulses must stay within **Calibrate → Pulse range**, 600–2400 µs by default.

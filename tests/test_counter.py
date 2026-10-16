@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from counter.config import ConfigStore, defaults, validate
 from counter.controller import Counter
 from counter.hardware import PCA9685, SimulatedBoard
@@ -548,6 +548,54 @@ class UpdateProgressWebTests(unittest.TestCase):
 
 
 class EntryPointTests(unittest.TestCase):
+    def boot(self, *args, fail_enable=False):
+        from counter import __main__ as entry
+        board = RecordingBoard()
+        if fail_enable:
+            board.enable = Mock(side_effect=OSError("Board disconnected"))
+        self.addCleanup(board.close)
+        with tempfile.TemporaryDirectory() as directory, patch('waitress.serve') as serve, patch('signal.signal'), patch('atexit.register'), patch.object(entry, 'SimulatedBoard', return_value=board):
+            path = Path(directory) / 'config.json'
+            store = ConfigStore(path)
+            saved = defaults()
+            saved['positions'][0][0], saved['positions'][1][0] = 1400, 1600
+            store.save(saved)
+            with patch('sys.argv', ['counter', '--simulate', '--config', str(path), *args]):
+                entry.main()
+        return serve.call_args.args[0], board
+
+    def test_startup_ready_does_not_replay_positions_or_move(self):
+        app, board = self.boot()
+        client = app.test_client()
+        state = client.get('/api/state').get_json()
+        self.assertTrue(state['armed'])
+        self.assertTrue(board.enabled)
+        self.assertEqual(state['digits'], [None, None])
+        self.assertEqual(state['config']['positions'][0][0], 1400)
+        self.assertEqual(state['config']['positions'][1][0], 1600)
+        self.assertEqual(board.commands, [])
+        self.assertEqual(board.pulses, {})
+        import re
+        token = re.search(r'name="counter-token" content="([^"]+)"', client.get('/').get_data(as_text=True)).group(1)
+        self.assertEqual(client.post('/api/stop', json={}, headers={'X-Counter-Token': token}).status_code, 200)
+        client.get('/')  # Opening/reloading the dashboard must not undo Stop.
+        self.assertFalse(client.get('/api/state').get_json()['armed'])
+        self.assertFalse(board.enabled)
+
+    def test_explicit_start_stopped_requires_start(self):
+        app, board = self.boot('--start-stopped')
+        self.assertFalse(app.test_client().get('/api/state').get_json()['armed'])
+        self.assertFalse(board.enabled)
+        self.assertEqual(board.commands, [])
+
+    def test_startup_enable_failure_keeps_dashboard_available_and_outputs_off(self):
+        app, board = self.boot(fail_enable=True)
+        state = app.test_client().get('/api/state').get_json()
+        self.assertFalse(state['armed'])
+        self.assertFalse(board.enabled)
+        self.assertIn('Board disconnected', state['error'])
+        self.assertEqual(board.commands, [])
+
     def serve_with(self,*args):
         from counter import __main__ as entry
         with tempfile.TemporaryDirectory() as directory, patch('waitress.serve') as serve, patch('signal.signal'), patch('atexit.register'):
