@@ -2,7 +2,7 @@
 from copy import deepcopy
 import re
 from threading import Event, RLock, Thread
-from .config import integer, pulse
+from .config import integer, channel_pulse, channel_spec
 
 
 class Counter:
@@ -32,6 +32,7 @@ class Counter:
                 self.cancel.set()
                 self.armed = False
             return {"config": deepcopy(self.store.data), "number": self.requested,
+                    "servo_specs": [channel_spec(channel, self.store.data) for channel in range(16)],
                     "digits": self.digits[:self.store.data["count"]], "armed": self.armed,
                     "estopped": self.estopped, "ready": board["connected"] and not self.estopped and (self.armed or self.auto_ready),
                     "busy": self.busy, "moving_channel": self.moving_channel, "moving_digit": self.moving_digit,
@@ -102,8 +103,8 @@ class Counter:
                     if width is None:
                         raise ValueError(f"Number {tick} isn't set on servo {channel} yet. Set it in Calibrate first.")
                     moves.append((channel, width, str(tick)))
-            self.requested = number
             self._start(moves)
+            self.requested = number
 
     def step(self, delta):
         integer(delta, -10000, 10000, "Step")
@@ -136,17 +137,14 @@ class Counter:
                 path = start + list(range(1, 10)) + [0]
                 moves += [(channel, positions[channel][tick], str(tick)) for tick in path]
                 requested[channel] = "0"
-            self.requested = "".join(requested)
             self._start(moves)
+            self.requested = "".join(requested)
             return tested, skipped
 
     def preview(self, channel, width, duration_ms=None):
         with self.lock:
             integer(channel, 0, self.store.data["count"] - 1, "Channel")
-            low, high = self.store.data["min_pulse"], self.store.data["max_pulse"]
-            if type(width) is not int or not low <= width <= high:
-                raise ValueError(f"Choose a pulse from {low} to {high} µs, or widen the pulse range in Calibrate.")
-            pulse(width)
+            channel_pulse(channel, width, self.store.data)
             if duration_ms is not None:
                 integer(duration_ms, 100, 5000, "Test signal duration (ms)")
             # A Test is an explicit movement request, including after E-stop.
@@ -168,6 +166,10 @@ class Counter:
     def _start(self, moves, duration_ms=None):
         if not moves:
             return
+        # Validate every channel before enabling outputs or sending the first move,
+        # including retained calibration from before the channel-0 servo change.
+        for channel, width, _ in moves:
+            channel_pulse(channel, width, self.store.data)
         self.motion_revision += 1
         # Re-enable only for the explicit movement validated by the caller.
         if not self.armed:
@@ -255,6 +257,9 @@ class Counter:
             integer(channel, 0, self.store.data["count"] - 1, "Channel")
             if not isinstance(positions, list) or len(positions) != 10:
                 raise ValueError("Supply ten digit positions.")
+            for width in positions:
+                if width is not None:
+                    channel_pulse(channel, width, self.store.data)
             data = deepcopy(self.store.data)
             data["positions"][channel] = positions
             from .config import validate

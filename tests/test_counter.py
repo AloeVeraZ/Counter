@@ -433,16 +433,63 @@ class CounterTests(unittest.TestCase):
     def test_pulse_range_can_widen_for_servos_that_travel_further(self):
         self.counter.arm()
         with self.assertRaisesRegex(ValueError, "600 to 2400"):
-            self.counter.preview(0, 2600)
-        with self.assertRaisesRegex(ValueError, "outside the pulse range"):
-            self.counter.calibrate(0, [2600] * 10)
+            self.counter.preview(1, 2600)
+        with self.assertRaisesRegex(ValueError, "600 to 2400"):
+            self.counter.calibrate(1, [2600] * 10)
         self.counter.configure({'min_pulse': 500, 'max_pulse': 2700})
-        self.counter.calibrate(0, [500 + digit * 200 for digit in range(10)])
-        self.assertEqual(ConfigStore(self.store.path).data['positions'][0][9], 2300)
+        self.counter.calibrate(1, [500 + digit * 200 for digit in range(10)])
+        self.assertEqual(ConfigStore(self.store.path).data['positions'][1][9], 2300)
         self.counter.arm()
-        self.counter.preview(0, 2700)
+        self.counter.preview(1, 2700)
         self.finish()
-        self.assertEqual(self.board.commands[-1], (0, 2700))
+        self.assertEqual(self.board.commands[-1], (1, 2700))
+
+    def test_ft6335m_channel_zero_accepts_full_range_without_saving_digit_positions(self):
+        spec = self.counter.snapshot()['servo_specs'][0]
+        self.assertEqual(spec, {'model': 'FEETECH FT6335M', 'min_pulse': 500,
+                               'max_pulse': 2500, 'center_pulse': 1500,
+                               'frequency_hz': 50, 'travel_degrees': 360})
+        for width in (500, 1500, 2500):
+            self.counter.preview(0, width)
+            self.finish()
+        self.assertEqual(self.board.commands, [(0, 500), (0, 1500), (0, 2500)])
+        self.assertEqual(self.store.data['positions'][0], [None] * 10)
+        self.assertEqual(self.board.pulses, {})
+        self.assertIsNone(self.counter.snapshot()['servo_specs'][1]['model'])
+        self.counter.calibrate(0, [500, 2500] + [None] * 8)
+        self.assertEqual(ConfigStore(self.store.path).data['positions'][0][:2], [500, 2500])
+
+    def test_ft6335m_limits_cannot_be_widened_by_other_channels_range(self):
+        self.counter.configure({'min_pulse': 300, 'max_pulse': 4000})
+        for width in (499, 2501, 4000, True, '1500'):
+            with self.subTest(width=width), self.assertRaisesRegex(ValueError, '500 to 2500.*FT6335M'):
+                self.counter.preview(0, width)
+        original = deepcopy(self.store.data)
+        with self.assertRaisesRegex(ValueError, '500 to 2500'):
+            self.counter.calibrate(0, [2600] + [None] * 9)
+        self.assertEqual(self.store.data, original)
+        self.assertEqual(self.board.commands, [])
+        self.assertFalse(self.board.enabled)
+
+    def test_retained_ft6335m_out_of_range_calibration_blocks_whole_path_before_motion(self):
+        self.calibrate()
+        self.counter.configure({'max_pulse': 3000})
+        data = deepcopy(self.store.data)
+        data['positions'][0][3] = 2900
+        self.store.save(data)  # Simulate old calibration, without clamping or deleting it.
+        restored = ConfigStore(self.store.path)
+        self.assertEqual(restored.data['positions'][0][3], 2900)
+        self.counter.digits[:2] = ['0', '0']
+        self.counter.auto_ready = True
+        for action in (lambda: self.counter.show('50'), self.counter.test_sequence):
+            with self.assertRaisesRegex(ValueError, '500 to 2500.*FT6335M'):
+                action()
+            self.assertEqual(self.board.commands, [])
+            self.assertFalse(self.board.enabled)
+            self.assertEqual(self.counter.requested, '00')
+        # A corrected calibration can be saved without losing other channels.
+        self.counter.calibrate(0, [500 + digit * 200 for digit in range(10)])
+        self.assertEqual(self.store.data['positions'][1], data['positions'][1])
 
     def test_pulse_range_keeps_the_hardware_envelope_and_saved_pulses(self):
         for low, high in [(299, 2400), (600, 4001), (1500, 1550), (2000, 1000)]:
@@ -450,11 +497,11 @@ class CounterTests(unittest.TestCase):
                 self.counter.configure({'min_pulse': low, 'max_pulse': high})
         self.counter.configure({'max_pulse': 4000})
         self.board.enable()
-        self.board.write(0, 4000)  # the top of the envelope reaches the board
+        self.board.write(1, 4000)  # custom channels retain the wider envelope
         self.counter.configure({'max_pulse': 2400})
-        self.counter.calibrate(0, [2400] + [None] * 9)
+        self.counter.calibrate(1, [2400] + [None] * 9)
         # Narrowing past a saved pulse is refused and names that pulse.
-        with self.assertRaisesRegex(ValueError, "Servo 0, number 0 is 2400"):
+        with self.assertRaisesRegex(ValueError, "Servo 1, number 0 is 2400"):
             self.counter.configure({'max_pulse': 2300})
         self.assertEqual(self.store.data['max_pulse'], 2400)
 
@@ -577,6 +624,21 @@ class HardwareTests(unittest.TestCase):
             with self.subTest(width=width),self.assertRaises(ValueError): self.board.write(0,width)
         for channel in [-1,16,True]:
             with self.assertRaises(ValueError): self.board.write(channel,1500)
+
+    def test_ft6335m_pwm_uses_documented_limits_and_programmed_clock(self):
+        self.board.enable()
+        for width, expected_count in ((500, 103), (1500, 307), (2500, 512)):
+            self.board.write(0, width)
+            self.assertEqual(self.bus.writes[-1], (0x40, 0x06,
+                                                 [0, 0, expected_count & 255, expected_count >> 8]))
+            actual_us = expected_count * (self.bus.registers[0xFE] + 1) / 25
+            self.assertGreaterEqual(actual_us, 500)
+            self.assertLessEqual(actual_us, 2500)
+            self.assertLess(abs(actual_us - width), 4.89)
+        for width in (499, 2501):
+            with self.assertRaises(ValueError):
+                self.board.write(0, width)
+        self.assertEqual(self.board.frequency, 50)
 
 
 class FakeUpdates:

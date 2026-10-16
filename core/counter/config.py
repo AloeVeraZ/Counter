@@ -8,11 +8,18 @@ import tempfile
 # The board never sends a pulse outside this envelope, whatever range is configured.
 LIMIT_MIN_PULSE = 300
 LIMIT_MAX_PULSE = 4000
-# The configurable pulse range starts here; widen it in Calibrate for servos that travel further.
+# Custom channels (1-15) start here; channel 0 uses the model profile below.
 DEFAULT_MIN_PULSE = 600
 DEFAULT_MAX_PULSE = 2400
+# Channel 0 now uses the owner's FEETECH FT6335M. The PCA9685 frequency is
+# shared by all sixteen outputs. Source: FEETECH specification, sections 7/11:
+# https://www.feetechrc.com/Data/feetechrc/upload/file/20210805/6376375592116931139738128.pdf
+SERVO_FREQUENCY_HZ = 50
+FT6335M = {"model": "FEETECH FT6335M", "min_pulse": 500, "max_pulse": 2500,
+           "center_pulse": 1500, "frequency_hz": SERVO_FREQUENCY_HZ, "travel_degrees": 360}
 # Settings added after the first release. While they hold these defaults they are left
-# out of config.json, so releases that predate them can still read the file.
+# out of config.json to preserve its format. Older releases still need a range
+# covering any channel-0 endpoint calibration saved using the model profile.
 OPTIONAL_KEYS = {"min_pulse": DEFAULT_MIN_PULSE, "max_pulse": DEFAULT_MAX_PULSE,
                  # Per servo: its wheel wraps (a 360° servo), so 9 and 0 are neighbours.
                  "wrap": [False] * 16}
@@ -26,6 +33,24 @@ def integer(value, minimum, maximum, label):
 
 def pulse(value, minimum=LIMIT_MIN_PULSE, maximum=LIMIT_MAX_PULSE):
     return integer(value, minimum, maximum, "Pulse width (µs)")
+
+
+def channel_spec(channel, data=None):
+    integer(channel, 0, 15, "Channel")
+    if channel == 0:
+        return dict(FT6335M)
+    return {"model": None, "min_pulse": data["min_pulse"] if data else LIMIT_MIN_PULSE,
+            "max_pulse": data["max_pulse"] if data else LIMIT_MAX_PULSE,
+            "center_pulse": None, "frequency_hz": SERVO_FREQUENCY_HZ, "travel_degrees": None}
+
+
+def channel_pulse(channel, width, data=None):
+    spec = channel_spec(channel, data)
+    low, high = spec["min_pulse"], spec["max_pulse"]
+    if type(width) is not int or not low <= width <= high:
+        model = f" ({spec['model']})" if spec["model"] else ""
+        raise ValueError(f"Choose a pulse from {low} to {high} µs for servo {channel}{model}.")
+    return pulse(width)
 
 
 def defaults():
@@ -54,10 +79,14 @@ def validate(data):
     for channel, row in enumerate(positions):
         if not isinstance(row, list) or len(row) != 10:
             raise ValueError("Each display needs ten digit positions.")
+        # Retain old channel-0 calibration verbatim, including obsolete wider
+        # pulses. Motion and new calibration enforce the FT6335M range; an
+        # upgrade must not discard positions or prevent the dashboard opening.
+        row_low, row_high = (LIMIT_MIN_PULSE, LIMIT_MAX_PULSE) if channel == 0 else (low, high)
         for digit, value in enumerate(row):
-            if value is not None and (type(value) is not int or not low <= value <= high):
+            if value is not None and (type(value) is not int or not row_low <= value <= row_high):
                 raise ValueError(f"Servo {channel}, number {digit} is {value} µs, outside the pulse range "
-                                 f"{low}–{high} µs. Widen the range or change that pulse first.")
+                                 f"{row_low}–{row_high} µs. Widen the range or change that pulse first.")
     return deepcopy(data)
 
 

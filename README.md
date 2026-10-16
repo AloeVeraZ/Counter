@@ -228,13 +228,37 @@ Escape always stops. Counter starts ready without moving a servo, unless
 launched with `--start-stopped`. This software control stops signals, not servo power.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
-Pulses must stay within **Calibrate → Pulse range**, 600–2400 µs by default.
+**Channel 0 is configured for the FEETECH FT6335M:** **50 Hz**, **1500 µs center**,
+and **500–2500 µs** position pulses for its documented **360° travel**. All
+PCA9685 channels share the 50 Hz frequency. Calibration Test, normal digit
+commands, configuration tests, and direct board writes enforce channel 0's
+model limits; changing the other channels' range cannot widen them. The test
+panel displays these settings and can fill the center pulse without moving;
+press **Send test pulse** to actually test it.
+
+Saved digit positions are preserved when updating, not remapped to the new
+servo. Old channel-0 pulses outside 500–2500 µs remain visible but are refused
+before motion; correct them in Calibrate. Recalibrate the physical digit stops
+after replacing the servo. Empty rows offer unsaved suggestions 36° apart
+(500, 700, ..., 2300 µs), leaving a gap between 9 and 0. These are starting
+points, not measured or saved positions. Wrapping stays off unless you have
+verified the physical 9/0 transition: a 360° range does not guarantee the
+shortest physical path across the pulse boundary. FEETECH specifies angle
+deviation up to 1°; PCA9685 pulses are quantized, so individual degrees are
+not guaranteed. The driver uses the programmed prescaler and rounds endpoint
+pulses inward, based on the nominal 25 MHz oscillator; actual timing depends
+on the board's oscillator tolerance.
+[FT6335M manufacturer specification, sections 7 and 11](https://www.feetechrc.com/Data/feetechrc/upload/file/20210805/6376375592116931139738128.pdf).
+
+**Channels 1–15** use **Calibrate → Other channels' pulse range**,
+600–2400 µs by default.
 Change it only within the servo manufacturer's limits, inside a fixed 300–4000 µs envelope the
 board never exceeds. Neither is **a statement that your servo can safely travel
 that far**; use the servo's datasheet and the mechanism's clearance. The range
-can't be narrowed past a saved pulse. While it is the default, `config.json`
-keeps its earlier format, so releases without range support can still read it;
-after widening it, run only releases that include this setting. Default settling time
+can't be narrowed past a saved pulse on those channels. The saved file format
+is unchanged, but older releases without the channel-0 profile may reject its
+500/2500 µs endpoint calibration unless their custom range includes it. After
+widening the custom range, run only releases that include that setting. Default settling time
 is 500 ms, followed by a default 500 ms pause before the next move; adjust
 both to your mechanism. Positions are commanded without
 feedback, so the UI cannot confirm physical alignment or detect a stalled or
@@ -246,7 +270,7 @@ directly reach a full 360° wheel. A continuous-rotation servo controls speed an
 direction, not absolute position; it needs feedback and a different controller.
 The supplied CAD screenshot alone does not establish the required travel.
 
-**goBILDA 2000-0025-0002 Torque:** position mode supports **300°** using
+**goBILDA 2000-0025-0002 Torque (other channels):** position mode supports **300°** using
 **500–2500 µs at 50 Hz**. The default 600–2400 µs range covers about 270°.
 Calibrate → Pulse range has a button to fill its documented limits; you must
 save separately. This changes no saved digit positions or servo firmware.

@@ -1,12 +1,14 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="counter-token"]').content;
-let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, draft = [], servoSignature = '', lastShown = [];
+let state = null, auto = false, nextCount = null, ticking = false, setupSignature = '', calibrationSignature = '', displaySignature = '', pickerSignature = '', requestPending = 0, pollTimer = null, updateState = null, updateChannelChosen = false, updateWatch = null, calChannel = 0, draft = [], servoSignature = '', lastShown = [], testPulseChannel = null;
 function canMove() { return state?.ready ?? state?.armed ?? false; }
 const NUDGE = 10;
-// The configured pulse range (Calibrate → Pulse range), within the board's fixed 300–4000 µs envelope.
-function pulseMin() { return state?.config.min_pulse ?? 600; }
-function pulseMax() { return state?.config.max_pulse ?? 2400; }
+// Channel 0 has documented FT6335M limits; the editable range applies to other channels.
+function servoSpec(channel = calChannel) { return state?.servo_specs?.[channel]; }
+function pulseMin(channel = calChannel) { return servoSpec(channel)?.min_pulse ?? state?.config.min_pulse ?? 600; }
+function pulseMax(channel = calChannel) { return servoSpec(channel)?.max_pulse ?? state?.config.max_pulse ?? 2400; }
+function validSavedPulse(width, channel) { return Number.isInteger(width) && width >= pulseMin(channel) && width <= pulseMax(channel); }
 function schedulePoll(delay) { clearTimeout(pollTimer); pollTimer = setTimeout(tick,delay); }
 function pollDelay() { if (document.hidden && !state?.armed) return 15000; return state?.busy ? 250 : auto ? 500 : state?.armed ? 1000 : 3000; }
 function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = !message; $('notice').classList.toggle('error', error); }
@@ -34,8 +36,9 @@ function view(name) {
 function option(value, text) { const el = document.createElement('option'); el.value = value; el.textContent = text; return el; }
 function element(tag, className, text) { const el = document.createElement(tag); if (className) el.className = className; if (text !== undefined) el.textContent = text; return el; }
 for (let n = 1; n <= 16; n++) $('count').append(option(n, `${n} ${n === 1 ? 'display' : 'displays'}`));
-// Unsaved starting points: number 0 at the minimum pulse, evenly up to the maximum for 9.
-function suggestedPulse(digit) { return Math.round(pulseMin() + digit * (pulseMax() - pulseMin()) / 9); }
+// Unsaved suggestions only. Ten stops on a full turn are 36 degrees apart,
+// leaving one gap between 9 and 0 instead of suggesting the same endpoint twice.
+function suggestedPulse(digit) { return Math.round(pulseMin() + digit * (pulseMax() - pulseMin()) / (servoSpec()?.travel_degrees === 360 ? 10 : 9)); }
 function clampPulse(width) { return Math.min(pulseMax(), Math.max(pulseMin(), Math.round(width))); }
 // Calibrate edits a draft of the chosen servo's ten pulses until Save. Servos use the board's channel numbers, 0–15.
 function savedPositions() { return state?.config.positions[calChannel] || []; }
@@ -46,7 +49,7 @@ function refreshCalibrationStatus() {
     const digit = Number(row.dataset.digit), width = draft[digit] ?? null;
     const changed = width !== (saved[digit] ?? null);
     row.classList.toggle('changed', changed); row.classList.toggle('saved', !changed && width !== null); row.classList.toggle('unset', !changed && width === null);
-    row.querySelector('.row-status').textContent = changed ? 'Not saved' : width === null ? 'Not set' : 'Saved';
+    row.querySelector('.row-status').textContent = width !== null && !validSavedPulse(width, calChannel) ? 'Outside range' : changed ? 'Not saved' : width === null ? 'Not set' : 'Saved';
   });
   $('save-calibration').textContent = changes ? `Save servo ${calChannel} · ${changes} change${changes === 1 ? '' : 's'}` : `Save servo ${calChannel}`;
   $('copy-calibration').textContent = `Same kind of servos? Copy servo ${calChannel} to the others`;
@@ -97,11 +100,11 @@ function calibrationRows(force = false) {
 function renderPicker() {
   if (!state) return;
   const {count, positions} = state.config;
-  const signature = JSON.stringify([count, positions, state.config.wrap, calChannel, state.moving_channel]);
+  const signature = JSON.stringify([count, positions, state.config.wrap, state.servo_specs, calChannel, state.moving_channel]);
   if (signature === pickerSignature) return;
   pickerSignature = signature;
   $('display-picker').replaceChildren(...Array.from({length:count}, (_, channel) => {
-    const saved = positions[channel].filter(p => p !== null).length;
+    const saved = positions[channel].filter(p => validSavedPulse(p, channel)).length;
     const button = element('button', `display-chip${saved === 10 ? ' ready' : ''}${state.moving_channel === channel ? ' moving' : ''}`);
     button.type = 'button'; button.setAttribute('aria-pressed', String(channel === calChannel));
     const wraps = state.config.wrap[channel];
@@ -110,8 +113,8 @@ function renderPicker() {
     button.addEventListener('click', () => selectDisplay(channel));
     return button;
   }));
-  const saved = positions[calChannel].filter(p => p !== null).length;
-  $('picked-status').textContent = `Servo ${calChannel} · ${saved} of 10 saved`;
+  const saved = positions[calChannel].filter(p => validSavedPulse(p, calChannel)).length;
+  $('picked-status').textContent = `Servo ${calChannel} · ${saved} of 10 valid saved positions`;
   $('wrap-name').textContent = calChannel;
   $('wrap-servo').checked = state.config.wrap[calChannel];
 }
@@ -120,6 +123,16 @@ function renderPulseTest() {
   $('send-test-pulse').textContent = `Send test pulse to CH ${calChannel}`;
   $('send-test-pulse').disabled = false;
   const input = $('test-pulse'); input.min = pulseMin(); input.max = pulseMax();
+  const spec = servoSpec();
+  $('servo-spec').textContent = spec?.model
+    ? `CH ${calChannel} · ${spec.model} · ${spec.frequency_hz} Hz · center ${spec.center_pulse} µs · ${spec.min_pulse}–${spec.max_pulse} µs · ${spec.travel_degrees}° position travel. Recalibrate the digit stops for this servo; saved positions are not remapped.`
+    : `CH ${calChannel} · custom servo · ${spec?.frequency_hz ?? 50} Hz · ${pulseMin()}–${pulseMax()} µs. Check this servo's own specifications.`;
+  $('fill-center-pulse').hidden = spec?.center_pulse == null;
+  if (spec?.center_pulse != null) $('fill-center-pulse').textContent = `Fill center pulse · ${spec.center_pulse} µs`;
+  if (testPulseChannel !== calChannel) {
+    testPulseChannel = calChannel;
+    input.value = spec?.center_pulse ?? clampPulse(1500);
+  }
   const signal = state.signals?.[calChannel];
   const status = {active:'PWM active', released:'PWM released', interrupted:'Interrupted', failed:'Board command failed'};
   const detail = signal ? `${state.simulated ? 'Simulation · ' : ''}CH ${calChannel}: ${signal.pulse_us} µs · requested ${signal.duration_ms} ms · ${status[signal.status] || signal.status}. Physical position is not measured.` : 'No pulse sent to this port since Counter started.';
@@ -168,7 +181,7 @@ function render(value) {
   state = value;
   const {count,settle_ms,positions} = value.config;
   const pause_ms = value.config.pause_ms ?? 500;
-  const ready = positions.slice(0,count).filter(row => row.every(p => p !== null)).length;
+  const ready = positions.slice(0,count).filter((row, channel) => row.every(p => validSavedPulse(p, channel))).length;
   if (calChannel >= count) { calChannel = count - 1; calibrationSignature = ''; }
   $('connection').textContent = value.simulated ? 'Preview on this PC' : value.board.connected ? 'Board connected' : 'Board offline';
   $('connection').className = `status ${value.board.connected ? 'good' : 'bad'}`;
@@ -191,12 +204,12 @@ function render(value) {
   $('display-count').textContent = count; $('last-channel').textContent = count - 1;
   $('range-label').textContent = `${'0'.repeat(count)}–${'9'.repeat(count)}`;
   $('number').maxLength = count;
-  const range = `${pulseMin()}–${pulseMax()} µs`;
+  const range = `${value.config.min_pulse}–${value.config.max_pulse} µs`;
   $('range-summary').textContent = $('servo-range').textContent = range;
   const signature = `${count}:${settle_ms}:${pause_ms}:${range}`;
   if (signature !== setupSignature) {
     setupSignature = signature; $('count').value = count;
-    $('min-pulse').value = pulseMin(); $('max-pulse').value = pulseMax();
+    $('min-pulse').value = value.config.min_pulse; $('max-pulse').value = value.config.max_pulse;
     if (![...$('settle').options].some(o => Number(o.value) === settle_ms)) $('settle').append(option(settle_ms, `${settle_ms} ms`));
     $('settle').value = settle_ms;
     if (![...$('pause').options].some(o => Number(o.value) === pause_ms)) $('pause').append(option(pause_ms,`${pause_ms} ms`));
@@ -252,6 +265,7 @@ $('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=
 $('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved.'))();});
 $('range-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);run(()=>command('/api/setup',{min_pulse:Number($('min-pulse').value),max_pulse:Number($('max-pulse').value)},'Pulse range saved. Press Test to try a pulse.').then(()=>calibrationRows(true)))();});
 $('pulse-test-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);const channel=calChannel;run(()=>command('/api/preview',{channel,pulse_us:Number($('test-pulse').value),duration_ms:Number($('test-duration').value)}))();});
+$('fill-center-pulse').addEventListener('click',()=>{const center=servoSpec()?.center_pulse;if(center!=null){$('test-pulse').value=center;notice(`Center pulse ${center} µs filled for CH ${calChannel}. Press Send test pulse to move; nothing saved or moved.`);}});
 $('gobilda-torque-range').addEventListener('click',()=>{$('min-pulse').value=500;$('max-pulse').value=2500;notice('500–2500 µs filled for goBILDA 2000-0025-0002 position mode (300°). Check all connected servos, then Save range. Nothing saved or moved.');});
 $('save-calibration').addEventListener('click',run(()=>{setAuto(false);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Servo ${channel} saved. Press Test to try a pulse.`).then(()=>calibrationRows(true));}));
 // For identical servos: copy one servo's saved pulses to the others, then fine-tune any that differ.

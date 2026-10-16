@@ -37,6 +37,7 @@
         <div class="panel-body">
           <p class="step-label">1 · Choose a servo (board channel 0–15)</p>
           <div id="display-picker" class="display-picker" role="group" aria-label="Servo to calibrate"></div>
+          <p class="help" id="servo-spec"></p>
           <label class="checkbox wrap-toggle"><input type="checkbox" id="wrap-servo"><span><strong>Servo <span id="wrap-name">0</span> wraps around</strong><small>Only enable after verifying that the hardware moves between 9 and 0 by one physical step in both directions. This changes the digit order; it cannot add travel, change the servo's mode, or control which way the servo turns.</small></span></label>
           <p class="step-label">2 · Edit a pulse with typing or − / +, then press Test to try it</p>
           <div id="calibration-rows" class="calibration-rows"></div>
@@ -60,7 +61,8 @@
           <div class="panel-head"><h2>Test selected port</h2><span class="pill" id="test-port">CH 0</span></div>
           <form class="panel-body" id="pulse-test-form">
             <p class="help">Sends one pulse to the selected servo above. Works without saved digits and does not change calibration. Changing these fields does not move anything.</p>
-            <label class="field">Test pulse (µs) <input id="test-pulse" type="number" value="1500" min="600" max="2400" step="1" inputmode="numeric" required></label>
+            <label class="field">Test pulse (µs) <input id="test-pulse" type="number" value="1500" min="500" max="2500" step="1" inputmode="numeric" required></label>
+            <button class="wide" id="fill-center-pulse" type="button" hidden>Fill center pulse · 1500 µs</button>
             <label class="field">Signal duration <select id="test-duration"><option value="500">500 ms</option><option value="1000" selected>1 second</option><option value="2000">2 seconds</option><option value="5000">5 seconds</option></select></label>
             <button class="wide" id="send-test-pulse" type="submit">Send test pulse to CH 0</button>
             <p class="help" id="last-signal" role="status">No pulse sent to this port since Counter started.</p>
@@ -76,13 +78,13 @@
           </form>
         </section>
         <section class="panel">
-          <div class="panel-head"><h2>Pulse range</h2><span class="subtle" id="range-summary">600–2400 µs</span></div>
+          <div class="panel-head"><h2>Other channels' pulse range</h2><span class="subtle" id="range-summary">600–2400 µs</span></div>
           <form class="panel-body" id="range-form">
             <div class="range-fields">
               <label class="field">Lowest pulse <input type="number" id="min-pulse" min="300" max="4000" step="1" inputmode="numeric" required></label>
               <label class="field">Highest pulse <input type="number" id="max-pulse" min="300" max="4000" step="1" inputmode="numeric" required></label>
             </div>
-            <p class="help">These limits apply to every servo. Use each servo's documented pulse limits. Counter's 300–4000 µs envelope is a software limit, not a safe range for every servo. Increasing pulses beyond the manufacturer's limit does not add usable travel.</p>
+            <p class="help">Channel 0 uses the FEETECH FT6335M's fixed 500–2500 µs range with a 1500 µs center at 50 Hz. These editable limits apply to channels 1–15 only. Use each servo's documented limits; increasing pulses does not add usable travel. <a href="https://www.feetechrc.com/Data/feetechrc/upload/file/20210805/6376375592116931139738128.pdf" target="_blank" rel="noopener">FT6335M manufacturer specifications ↗</a></p>
             <button class="wide" id="gobilda-torque-range" type="button">Fill goBILDA 0002 range · 500–2500 µs</button>
             <p class="help">For the 2000-0025-0002 Torque in position mode: 300° maximum, not 360°. Filling the fields does not save or move anything. Check all connected servos before saving.</p>
             <button class="wide" type="submit">Save range</button>
@@ -177,7 +179,7 @@
     <section class="panel servo-panel">
       <div class="panel-head"><h2>Servos</h2><span class="subtle">Saved pulse for each number, in microseconds (µs)</span></div>
       <div class="panel-body">
-        <p class="help">Each servo stores its own pulse for every number 0–9. Servo numbers are the board's channels, 0–15. To change a pulse, choose Calibrate on that servo's row. Pulses stay within the range set in Calibrate → Pulse range, now <span id="servo-range">600–2400 µs</span>.</p>
+        <p class="help">Each servo stores its own pulse for every number 0–9. Servo numbers are the board's channels, 0–15. To change a pulse, choose Calibrate on that servo's row. Channel 0 uses the FT6335M's 500–2500 µs limits; the custom range for channels 1–15 is <span id="servo-range">600–2400 µs</span>. The PCA9685 runs all channels at 50 Hz.</p>
         <div class="servo-table-wrap"><table class="servo-table">
           <thead><tr><th scope="col">Servo</th><th scope="col">Now</th><th scope="col">0</th><th scope="col">1</th><th scope="col">2</th><th scope="col">3</th><th scope="col">4</th><th scope="col">5</th><th scope="col">6</th><th scope="col">7</th><th scope="col">8</th><th scope="col">9</th><th scope="col"><span class="sr-only">Calibrate</span></th></tr></thead>
           <tbody id="servo-rows"></tbody>
