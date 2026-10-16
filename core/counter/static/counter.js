@@ -247,12 +247,13 @@ $('number-form').addEventListener('submit',event=>{event.preventDefault();setAut
 document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/step',{delta:Number(button.dataset.step)});$('number').value=result.number;})));
 $('zero').addEventListener('click',run(async()=>{setAuto(false);const result=await command('/api/number',{number:'0'});$('number').value=result.number;}));
 $('auto').addEventListener('click',()=>setAuto(!auto));
-$('wrap-servo').addEventListener('change',run(()=>{const channel=calChannel,enabled=$('wrap-servo').checked;return command('/api/wrap',{channel,enabled},enabled?`Servo ${channel} now wraps: 9 → 0 moves forward one step.`:`Servo ${channel} no longer wraps.`).catch(error=>{$('wrap-servo').checked=!enabled;throw error;});}));
+$('wrap-servo').addEventListener('change',run(()=>{const channel=calChannel,enabled=$('wrap-servo').checked;return command('/api/wrap',{channel,enabled},enabled?`Servo ${channel}: 9 and 0 are now neighbouring digits. Physical wrapping depends on the hardware.`:`Servo ${channel} no longer wraps.`).catch(error=>{$('wrap-servo').checked=!enabled;throw error;});}));
 $('test-sequence').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);return command('/api/test-sequence',{});}));
 $('interval').addEventListener('change',()=>{if(auto)nextCount=Date.now()+Number($('interval').value);});
 $('setup-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Setup saved. Servos are off.'))();});
 $('timing-form').addEventListener('submit',event=>{event.preventDefault();run(()=>saveSetup('Timing saved. Servos are off.'))();});
 $('range-form').addEventListener('submit',event=>{event.preventDefault();setAuto(false);clearTimeout(previewTimer);run(()=>command('/api/setup',{min_pulse:Number($('min-pulse').value),max_pulse:Number($('max-pulse').value)},'Pulse range saved. Servos are off.').then(()=>calibrationRows(true)))();});
+$('gobilda-torque-range').addEventListener('click',()=>{$('min-pulse').value=500;$('max-pulse').value=2500;notice('500–2500 µs filled for goBILDA 2000-0025-0002 position mode (300°). Check all connected servos, then Save range. Nothing saved or moved.');});
 $('save-calibration').addEventListener('click',run(()=>{setAuto(false);clearTimeout(previewTimer);const channel=calChannel;return command('/api/calibration',{channel,positions:draft.slice()},`Servo ${channel} saved. Servos are off.`).then(()=>calibrationRows(true));}));
 // For identical servos: copy one servo's saved pulses to the others, then fine-tune any that differ.
 $('copy-calibration').addEventListener('click',run(async()=>{

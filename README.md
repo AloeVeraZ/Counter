@@ -189,24 +189,25 @@ Servos are numbered by their board channel, 0–15; servo 0 is the leftmost digi
 6. In **Calibrate → Try a number**, enter a number. Leading zeros fill unused
    places. The **Display** tab shows the commanded number as a live preview.
 
-### Wrap-around (360° servos)
+### Wrap-around digit order
 
-Some servos have no end stop and turn whichever way is shorter to reach a new
-position. For such a wheel, space 0–9 evenly round the full turn (36° apart),
-keep 0 and 9 about half a step in from the ends of the pulse range, and turn on
-**Servo N wraps around** under the servo buttons in Calibrate. Counter then
-treats 9 and 0 as neighbours and takes the shorter way round, forward on a tie,
-still one number per move: counting 09 → 10 rolls the last wheel forward from 9
-to 0 like a car odometer. Because each move is a single 36° step, the servo's
-own shorter way is always the intended direction. The setting is per servo and
-off by default; a servo that does not really wrap just runs back from 9 to 0 in
-one move. Wrapping servos show ↻ in Calibrate and in Settings → Servos.
+**Servo N wraps around** makes 9 and 0 neighbouring digits. Counter chooses
+the shorter sequence of saved digits, forward on a tie, still one digit per
+command. This setting is per servo, off by default, and shown with ↻.
+
+It changes the logical path only. It cannot add travel, program a servo's mode,
+or choose its physical rotation direction. Even a servo with a full turn of
+position control may reverse across most of its range when commanded from 9
+to 0. Enable wrapping only after verifying one-step physical movement across
+that boundary in both directions. Leave it off for ordinary limited-travel
+position servos; pulse-end offsets do not make them wrap.
 
 To check the whole build, press **Start**, then **Display → Test configuration**.
 Each fully calibrated servo, starting with servo 0, counts from 0 up to 9 one
 number at a time, then returns straight to 0 before the next servo begins; the
-preview follows along. (Only this test jumps back; showing a number always steps
-through the numbers in between.) Servos without all ten numbers saved are skipped and named.
+preview follows along. This test returns directly to 0 regardless of the wrap
+setting; normal commands follow the configured neighbouring-digit path.
+Servos without all ten numbers saved are skipped and named.
 **Stop** ends the test immediately.
 
 Each servo keeps its own pulse for every number, so different servos can be set
@@ -222,7 +223,7 @@ at startup.
 
 Each module has its own ten pulse widths, so spacing can be uneven or reversed.
 Pulses must stay within **Calibrate → Pulse range**, 600–2400 µs by default.
-Widen it for servos that travel further, inside a fixed 300–4000 µs envelope the
+Change it only within the servo manufacturer's limits, inside a fixed 300–4000 µs envelope the
 board never exceeds. Neither is **a statement that your servo can safely travel
 that far**; use the servo's datasheet and the mechanism's clearance. The range
 can't be narrowed past a saved pulse. While it is the default, `config.json`
@@ -239,14 +240,33 @@ directly reach a full 360° wheel. A continuous-rotation servo controls speed an
 direction, not absolute position; it needs feedback and a different controller.
 The supplied CAD screenshot alone does not establish the required travel.
 
-The goBILDA standard-size category includes several different servo families.
-Its regular 2000 Series Dual Mode servos have 300° of position-controlled
-travel; the 5-Turn versions have 1800°. Continuous-rotation mode uses PWM to
-command speed/direction, not a digit position. Confirm the exact SKU and mode
-before choosing pulse limits, travel or settling time. Counter's manual
-calibration does not program a servo's operating mode. Sources:
-[regular Dual Mode specifications](https://www.gobilda.com/2000-series-dual-mode-servo-25-4-super-speed/),
+**goBILDA 2000-0025-0002 Torque:** position mode supports **300°** using
+**500–2500 µs at 50 Hz**. The default 600–2400 µs range covers about 270°.
+Calibrate → Pulse range has a button to fill its documented limits; you must
+save separately. This changes no saved digit positions or servo firmware.
+Pulses above 2500 µs do not provide documented extra travel. Continuous mode
+controls speed/direction, not absolute angle.
+[Manufacturer specifications](https://www.gobilda.com/2000-series-dual-mode-servo-25-2-torque/).
+
+The **goBILDA 2000-0025-0502 5-Turn Torque** supports 1800° of position travel
+over 500–2500 µs. It can cover a 0–359° interval, but cannot rotate indefinitely
+through the pulse boundary. With the PCA9685 at 50 Hz, one PWM count is about
+4.88 µs, or 4.4° on this model, so it cannot select every individual degree.
+Calibrate the actual digit stops rather than spreading them across five turns.
 [5-Turn specifications](https://www.gobilda.com/2000-series-5-turn-dual-mode-servo-25-2-torque/).
+
+**Axon MAX+ (not MK2):** the compatible Axon programmer's Servo Angle setting
+scales 0–255 to 0–355°. Read the current settings, use 255 for full travel in
+Servo Mode, then Write. Set Loose PWM Protection to **Release**, because
+Counter releases PWM after every move. This model cannot cover every angle
+from 0–359° in ordinary position mode. Ten evenly spaced digit stops span
+324° (nine gaps of 36°), so they can fit within 355° if the mechanism permits;
+leave wrapping off. Use the MAX+'s own documented pulse limits rather than
+assuming another model's limits apply. Counter does not program servo firmware
+or close a feedback loop in CR mode.
+[MAX+ programmer instructions](https://docs.axon-robotics.com/archive/programmer).
+Power it from a suitable external servo supply: Axon lists 3.6 A stall current
+even at 4.8 V. [MAX+ specifications](https://docs.axon-robotics.com/archive/max).
 
 The +/− buttons count without wrapping at the maximum. Up to sixteen decimal
 digits are kept as strings; no JavaScript floating-point rounding occurs.
@@ -254,8 +274,8 @@ Auto count runs while this dashboard is open and visible, waiting for each
 move to complete. It pauses on Stop, errors, tab hiding, or range overflow.
 From a known last-commanded digit, the worker advances **one neighboring digit
 at a time**: for example, 2→3→4, then the next channel. Decreases run in reverse;
-9→0 passes through 8,7,…,0 rather than assuming the servo can wrap around a
-full turn. Every intermediate digit must be calibrated before motion begins.
+9→0 passes through 8,7,…,0 unless that servo's wrapping option is enabled.
+Every intermediate digit must be calibrated before motion begins.
 Each tick settles, releases that channel's PWM, and pauses before the next
 tick. At most one channel receives PWM; a hold mode is no longer available.
 The mechanism must retain its displayed digit without servo holding torque.

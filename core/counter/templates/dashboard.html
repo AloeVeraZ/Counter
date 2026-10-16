@@ -37,7 +37,7 @@
         <div class="panel-body">
           <p class="step-label">1 · Choose a servo (board channel 0–15)</p>
           <div id="display-picker" class="display-picker" role="group" aria-label="Servo to calibrate"></div>
-          <label class="checkbox wrap-toggle"><input type="checkbox" id="wrap-servo"><span><strong>Servo <span id="wrap-name">0</span> wraps around (360° servo)</strong><small>Turn on if this wheel can go from 9 forward to 0. It then takes the shorter way round, so counting up rolls on like a car odometer instead of running back through 8 to 1.</small></span></label>
+          <label class="checkbox wrap-toggle"><input type="checkbox" id="wrap-servo"><span><strong>Servo <span id="wrap-name">0</span> wraps around</strong><small>Only enable after verifying that the hardware moves between 9 and 0 by one physical step in both directions. This changes the digit order; it cannot add travel, change the servo's mode, or control which way the servo turns.</small></span></label>
           <p class="step-label">2 · Type a pulse or press − / + until each number sits in its window</p>
           <div id="calibration-rows" class="calibration-rows"></div>
                     <button class="primary wide" id="save-calibration">Save servo 0</button>
@@ -49,7 +49,7 @@
               <li>Grey pulses are suggestions for numbers you haven't set. Click an empty box and press Tab to use the suggestion. Nothing is saved until you press Save.</li>
               <li>Go gently near the ends of travel, and stop if the mechanism hits its limit.</li>
               <li>Saving turns the servos off. Press Start again for the next servo.</li>
-              <li>Wraps around: for a 360° servo, space 0–9 evenly round the full turn and keep 0 and 9 about half a step in from the ends of the pulse range. Every move is still one number, so the servo's shorter way round is always the right way. If a servo doesn't really wrap, 9 to 0 simply runs back in one move; turn the setting off again.</li>
+              <li>Wraps around chooses the shorter sequence of saved digits, forward on a tie. A position servo can still reverse across most of its travel at 9 → 0; a full-turn range alone does not guarantee wrapping. Leave this off for ordinary limited-travel position servos.</li>
               <li>Settings → Servos shows every servo's saved pulses at a glance.</li>
             </ul>
           </details>
@@ -71,9 +71,18 @@
               <label class="field">Lowest pulse <input type="number" id="min-pulse" min="300" max="4000" step="1" inputmode="numeric" required></label>
               <label class="field">Highest pulse <input type="number" id="max-pulse" min="300" max="4000" step="1" inputmode="numeric" required></label>
             </div>
-            <p class="help">The lowest and highest pulse, in µs, any number can use. Widen it if your servo travels further. Check your servo's limits first: pushing past its end stop can strain it. Counter never sends below 300 or above 4000 µs.</p>
+            <p class="help">These limits apply to every servo. Use each servo's documented pulse limits. Counter's 300–4000 µs envelope is a software limit, not a safe range for every servo. Increasing pulses beyond the manufacturer's limit does not add usable travel.</p>
+            <button class="wide" id="gobilda-torque-range" type="button">Fill goBILDA 0002 range · 500–2500 µs</button>
+            <p class="help">For the 2000-0025-0002 Torque in position mode: 300° maximum, not 360°. Filling the fields does not save or move anything. Check all connected servos before saving.</p>
             <button class="wide" type="submit">Save range</button>
           </form>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Axon MAX+ setup</h2></div>
+          <div class="panel-body">
+            <p class="help">The MAX+ supports up to 355° in position mode. In its compatible Axon programmer, read the settings, set Servo Angle to 255 for full travel, and write them. Counter cannot program its mode or add the missing travel to reach 359°.</p>
+            <p class="help">Set Loose PWM Protection to Release: Counter stops the signal after every move. Ten stops spaced 36° apart span 324°, but verify alignment and leave wrapping off. <a href="https://docs.axon-robotics.com/archive/programmer" target="_blank" rel="noopener">MAX+ programmer instructions ↗</a></p>
+          </div>
         </section>
         <section class="panel">
           <div class="panel-head"><h2>Try a number</h2><span class="subtle" id="range-label">00–99</span></div>
@@ -95,7 +104,7 @@
         <div class="panel-body">
           <p id="board-summary" class="summary">Checking the servo board…</p>
           <p id="board-detail" class="subtle"></p>
-          <div class="power-note"><strong>Give the servos their own power.</strong><p>The Pi's 5 V pin is only for a quick test with a servo or two. For more, power V+ from a separate 5 V supply and connect its − to GND.</p></div>
+          <div class="power-note"><strong>Give the servos their own power.</strong><p>Use a separate V+ supply sized for your servos' voltage and stall current, with its − connected to GND. A single high-torque servo can exceed the Pi's available current; moving one at a time does not make Pi power sufficient.</p></div>
           <details class="more"><summary>Wiring guide</summary>
             <figure class="wiring-figure">
               <img src="/static/wiring.svg" alt="Complete wiring: Pi pins 1 VCC, 3 SDA, 5 SCL, 7 OE, 9 GND, 2 servo V+, plus the OE pull-up and each servo's three wires.">
