@@ -1,6 +1,7 @@
 """One PCA9685 at 0x40 on I²C1. OE is active-low on BCM4."""
 import time
-from .config import integer, pulse
+import math
+from .config import integer, channel_pulse, channel_spec, SERVO_FREQUENCY_HZ
 
 
 class SimulatedBoard:
@@ -22,7 +23,7 @@ class SimulatedBoard:
 
     def write(self, channel, width):
         integer(channel, 0, 15, "Channel")
-        pulse(width)
+        channel_pulse(channel, width)
         if not self.enabled:
             raise RuntimeError("Outputs are disabled.")
         self.pulses[channel] = width
@@ -37,7 +38,8 @@ class SimulatedBoard:
 class PCA9685:
     simulated = False
     address = 0x40
-    frequency = 50
+    frequency = SERVO_FREQUENCY_HZ
+    oscillator_hz = 25_000_000
 
     def __init__(self, bus=None, oe=None):
         self.bus = bus
@@ -65,7 +67,8 @@ class PCA9685:
         self.enabled = False
         self.bus.write_byte_data(self.address, 0x00, 0x30)  # AI + sleep
         self.bus.write_byte_data(self.address, 0x01, 0x04)  # totem-pole
-        self.bus.write_byte_data(self.address, 0xFE, round(25_000_000 / (4096 * 50)) - 1)
+        self.prescale = round(self.oscillator_hz / (4096 * self.frequency)) - 1
+        self.bus.write_byte_data(self.address, 0xFE, self.prescale)
         self.bus.write_byte_data(self.address, 0x00, 0x20)
         time.sleep(0.005)
         self.bus.write_byte_data(self.address, 0x00, 0xA0)
@@ -108,10 +111,15 @@ class PCA9685:
 
     def write(self, channel, width):
         integer(channel, 0, 15, "Channel")
-        pulse(width)
+        channel_pulse(channel, width)
         if not self.enabled:
             raise RuntimeError("Outputs are disabled.")
-        counts = round(width * self.frequency * 4096 / 1_000_000)
+        # Use the programmed prescaler, rather than an idealized 50 Hz period.
+        # Round inward at the model's limits (500 us must not round below 500).
+        tick_us = (self.prescale + 1) * 1_000_000 / self.oscillator_hz
+        spec = channel_spec(channel)
+        counts = max(math.ceil(spec["min_pulse"] / tick_us),
+                     min(math.floor(spec["max_pulse"] / tick_us), round(width / tick_us)))
         try:
             self.bus.write_i2c_block_data(self.address, 0x06 + 4 * channel,
                                          [0, 0, counts & 255, counts >> 8])

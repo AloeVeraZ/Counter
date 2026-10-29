@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from counter.config import ConfigStore, defaults, validate
 from counter.controller import Counter
 from counter.hardware import PCA9685, SimulatedBoard
@@ -49,10 +49,46 @@ class CounterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.counter.show("42")
         self.counter.arm()
-        with self.assertRaisesRegex(ValueError, "Calibrate digit 4 on channel 0"):
+        with self.assertRaisesRegex(ValueError, "Number 4 isn't set on servo 0"):
             self.counter.show("42")
         self.assertEqual(self.board.commands, [])
         self.assertEqual(self.counter.requested, "00")
+
+    def test_configuration_test_counts_each_servo_up_then_snaps_to_zero(self):
+        self.calibrate(count=2)
+        self.assertEqual(self.counter.test_sequence(), ([0, 1], []))
+        self.finish()
+        path = [0, *range(1, 10), 0]
+        expected = [(channel, 1000 + tick * 100 + channel) for channel in (0, 1) for tick in path]
+        self.assertEqual(self.board.commands, expected)
+        self.assertEqual(self.counter.digits[:2], ["0", "0"])
+        self.assertEqual(self.board.pulses, {})  # released after every move
+
+    def test_configuration_test_snaps_to_zero_from_a_known_digit_and_skips_unset_servos(self):
+        self.calibrate(count=3)
+        data = deepcopy(self.store.data)
+        data["positions"][1][7] = None
+        self.store.save(data)
+        self.counter.digits[0] = "3"
+        self.counter.arm()
+        self.assertEqual(self.counter.test_sequence(), ([0, 2], [1]))
+        self.finish()
+        ticks = [width - 1000 for channel, width in self.board.commands if channel == 0]
+        self.assertEqual([tick // 100 for tick in ticks], [0, *range(1, 10), 0])
+        self.assertNotIn(1, {channel for channel, _ in self.board.commands})
+
+    def test_configuration_test_needs_one_fully_calibrated_servo_and_stops_on_request(self):
+        self.counter.arm()
+        with self.assertRaisesRegex(ValueError, "at least one servo"):
+            self.counter.test_sequence()
+        self.calibrate(count=1)
+        self.fast_wait.stop()
+        self.counter.test_sequence()
+        self.counter.stop()
+        self.counter.worker.join(timeout=4)
+        self.assertLess(len(self.board.commands), 11)
+        self.assertFalse(self.board.enabled)
+        self.fast_wait.start()
 
     def test_decimal_digit_mapping_and_only_changed_channels(self):
         self.calibrate()
@@ -150,6 +186,150 @@ class CounterTests(unittest.TestCase):
         self.counter.configure({"count":2})
         self.assertEqual(self.store.data["positions"][1],table)
 
+    def test_single_port_test_uses_its_duration_without_saving_or_touching_other_ports(self):
+        before = deepcopy(self.store.data)
+        self.counter.arm()
+        waits = []
+        with patch.object(self.counter.cancel, 'wait', side_effect=lambda seconds: waits.append(seconds) or False):
+            self.counter.preview(1, 1500, 2000)
+            self.finish()
+        self.assertEqual(self.board.commands, [(1, 1500)])
+        self.assertEqual(waits, [2.0])
+        self.assertEqual(self.board.pulses, {})
+        self.assertEqual(self.store.data, before)
+        self.assertFalse(self.store.path.exists())
+        self.assertIsNone(self.counter.digits[1])
+        signals = self.counter.snapshot()['signals']
+        self.assertIsNone(signals[0])
+        self.assertEqual(signals[1], {'pulse_us': 1500, 'duration_ms': 2000, 'status': 'released'})
+        signals[1]['pulse_us'] = 999
+        self.assertEqual(self.counter.snapshot()['signals'][1]['pulse_us'], 1500)
+        restarted = Counter(ConfigStore(self.store.path), RecordingBoard())
+        self.addCleanup(restarted.close)
+        self.assertEqual(restarted.snapshot()['signals'], [None, None])
+
+    def test_test_after_estop_needs_no_reset_but_invalid_tests_leave_outputs_stopped(self):
+        self.counter.auto_ready = True
+        self.counter.calibrate(1, [None] * 10)
+        self.assertTrue(self.counter.snapshot()['ready'])
+        self.assertFalse(self.board.enabled)
+        self.counter.preview(1, 1500)
+        self.finish()
+        self.assertEqual(self.board.commands, [(1, 1500)])
+        self.counter.stop()
+        self.counter.configure({'settle_ms': 1000})
+        self.counter.calibrate(1, [None] * 10)
+        self.assertTrue(self.counter.snapshot()['estopped'])
+        self.assertFalse(self.counter.snapshot()['ready'])
+        with self.assertRaises(ValueError):
+            self.counter.preview(1, 5000)
+        self.assertFalse(self.board.enabled)
+        self.assertEqual(self.board.commands, [(1, 1500)])
+        self.counter.preview(1, 1700)
+        self.finish()
+        self.assertFalse(self.counter.snapshot()['estopped'])
+        self.assertEqual(self.board.commands[-1], (1, 1700))
+
+    def test_new_test_interrupts_previous_test_instead_of_requiring_start_or_wait(self):
+        from threading import Event
+        self.fast_wait.stop()
+        written = Event()
+        write = self.board.write
+        def record(channel, width):
+            self.assertFalse(self.board.pulses)
+            write(channel, width)
+            written.set()
+        with patch.object(self.board, 'write', side_effect=record):
+            self.counter.preview(0, 1400, 5000)
+            self.assertTrue(written.wait(1))
+            started = time.monotonic()
+            self.assertTrue(self.counter.preview(1, 1700, 100))
+            self.finish()
+            self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual(self.board.commands, [(0, 1400), (1, 1700)])
+        self.assertEqual(self.counter.signals[0]['status'], 'interrupted')
+        self.assertEqual(self.counter.signals[1]['status'], 'released')
+
+    def test_estop_during_test_replacement_cancels_pending_test(self):
+        from threading import Event, Thread
+        self.fast_wait.stop()
+        written, joining, proceed = Event(), Event(), Event()
+        write = self.board.write
+        def record(channel, width):
+            write(channel, width)
+            written.set()
+        with patch.object(self.board, 'write', side_effect=record):
+            self.counter.preview(0, 1400, 5000)
+            self.assertTrue(written.wait(1))
+        previous = self.counter.worker
+        join = previous.join
+        def delayed_join(timeout):
+            joining.set()
+            proceed.wait(2)
+            join(timeout)
+        results = []
+        with patch.object(previous, 'join', side_effect=delayed_join):
+            request = Thread(target=lambda: results.append(self.counter.preview(1, 1700)))
+            request.start()
+            try:
+                self.assertTrue(joining.wait(1))
+                self.counter.stop()
+            finally:
+                proceed.set()
+                request.join(timeout=2)
+        self.assertEqual(results, [False])
+        self.assertFalse(self.counter.armed)
+        self.assertFalse(self.board.enabled)
+        self.assertEqual(self.board.commands, [(0, 1400)])
+
+    def test_ready_mode_validates_whole_command_before_enabling_outputs(self):
+        self.counter.auto_ready = True
+        for command in [lambda: self.counter.preview(1, 5000),
+                        lambda: self.counter.preview(1, 1500, True),
+                        lambda: self.counter.show('42')]:
+            with self.assertRaises(ValueError):
+                command()
+            self.assertFalse(self.board.enabled)
+        self.assertEqual(self.board.commands, [])
+
+    def test_single_port_test_rejects_bad_duration_before_writing(self):
+        self.counter.arm()
+        for duration in [99, 5001, True, '2000', 1000.5]:
+            with self.subTest(duration=duration), self.assertRaises(ValueError):
+                self.counter.preview(1, 1500, duration)
+        self.assertEqual(self.board.commands, [])
+        self.assertEqual(self.counter.snapshot()['signals'], [None, None])
+
+    def test_stop_interrupts_long_test_and_reports_unknown_position(self):
+        from threading import Event
+        self.fast_wait.stop()
+        written = Event()
+        original_write = self.board.write
+        def write(channel, width):
+            original_write(channel, width)
+            written.set()
+        self.counter.arm()
+        with patch.object(self.board, 'write', side_effect=write):
+            self.counter.preview(1, 1500, 5000)
+            self.assertTrue(written.wait(1))
+            started = time.monotonic()
+            self.counter.stop()
+            self.assertFalse(self.board.enabled)
+            self.finish()
+            self.assertLess(time.monotonic() - started, 0.5)
+        self.assertIsNone(self.counter.digits[1])
+        self.assertEqual(self.counter.snapshot()['signals'][1]['status'], 'interrupted')
+
+    def test_failed_test_pulse_is_reported_as_failed_not_released(self):
+        self.counter.arm()
+        with patch.object(self.board, 'write', side_effect=OSError('I2C write failed')):
+            self.counter.preview(1, 1500, 1000)
+            self.finish()
+        self.assertFalse(self.board.enabled)
+        self.assertFalse(self.counter.armed)
+        self.assertIn('I2C write failed', self.counter.error)
+        self.assertEqual(self.counter.snapshot()['signals'][1]['status'], 'failed')
+
     def test_every_move_releases_even_with_legacy_hold_setting(self):
         self.calibrate()
         self.store.data["release_after_move"] = False
@@ -184,7 +364,7 @@ class CounterTests(unittest.TestCase):
         self.counter.requested = '42'
         self.store.data['positions'][0][2] = None
         self.counter.arm()
-        with self.assertRaisesRegex(ValueError,'Calibrate digit 2'):
+        with self.assertRaisesRegex(ValueError,"Number 2 isn't set"):
             self.counter.show('12')
         self.assertEqual(self.board.commands, [])
         self.assertEqual(self.counter.requested,'42')
@@ -207,6 +387,131 @@ class CounterTests(unittest.TestCase):
             self.finish()
         self.assertEqual(active,[1]*16)
         self.assertEqual(self.board.pulses,{})
+
+    def path_to(self, start, target, wrap):
+        """Digits servo 0 visits going from a known start to target."""
+        self.calibrate(count=1)
+        self.counter.set_wrap(0, wrap)
+        self.counter.arm()
+        self.counter.digits[0] = str(start)
+        self.board.commands.clear()
+        self.counter.show(str(target))
+        self.finish()
+        return [(width - 1000) // 100 for _, width in self.board.commands]
+
+    def test_wrapping_servo_rolls_forward_from_9_to_0_and_takes_the_shorter_way(self):
+        self.assertEqual(self.path_to(9, 0, wrap=True), [0])
+        self.assertEqual(self.path_to(8, 1, wrap=True), [9, 0, 1])
+        self.assertEqual(self.path_to(1, 8, wrap=True), [0, 9, 8])
+        self.assertEqual(self.path_to(2, 7, wrap=True), [3, 4, 5, 6, 7])  # tie goes forward
+        self.assertEqual(self.path_to(7, 2, wrap=True), [8, 9, 0, 1, 2])
+
+    def test_servos_that_do_not_wrap_still_step_back_through_every_number(self):
+        self.assertEqual(self.path_to(9, 0, wrap=False), [8, 7, 6, 5, 4, 3, 2, 1, 0])
+
+    def test_counting_up_carries_like_an_odometer_on_wrapping_servos(self):
+        self.calibrate(count=2)
+        self.counter.set_wrap(1, True)
+        self.counter.arm()
+        self.counter.digits[:2] = ["0", "9"]
+        self.counter.requested = "09"
+        self.counter.step(1)
+        self.finish()
+        self.assertEqual(self.board.commands, [(0, 1100), (1, 1001)])
+        self.assertEqual(self.counter.digits[:2], ["1", "0"])
+
+    def test_wrap_setting_is_saved_and_left_out_of_the_file_while_off(self):
+        self.counter.calibrate(0, [1500] * 10)
+        self.assertNotIn('wrap', json.loads(self.store.path.read_text()))
+        self.counter.set_wrap(3, True)
+        self.assertTrue(ConfigStore(self.store.path).data['wrap'][3])
+        self.assertFalse(ConfigStore(self.store.path).data['wrap'][2])
+        for channel, enabled in [(16, True), (0, 'yes'), (-1, False)]:
+            with self.subTest(channel=channel, enabled=enabled), self.assertRaises(ValueError):
+                self.counter.set_wrap(channel, enabled)
+
+    def test_pulse_range_can_widen_for_servos_that_travel_further(self):
+        self.counter.arm()
+        with self.assertRaisesRegex(ValueError, "600 to 2400"):
+            self.counter.preview(1, 2600)
+        with self.assertRaisesRegex(ValueError, "600 to 2400"):
+            self.counter.calibrate(1, [2600] * 10)
+        self.counter.configure({'min_pulse': 500, 'max_pulse': 2700})
+        self.counter.calibrate(1, [500 + digit * 200 for digit in range(10)])
+        self.assertEqual(ConfigStore(self.store.path).data['positions'][1][9], 2300)
+        self.counter.arm()
+        self.counter.preview(1, 2700)
+        self.finish()
+        self.assertEqual(self.board.commands[-1], (1, 2700))
+
+    def test_ft6335m_channel_zero_accepts_full_range_without_saving_digit_positions(self):
+        spec = self.counter.snapshot()['servo_specs'][0]
+        self.assertEqual(spec, {'model': 'FEETECH FT6335M', 'min_pulse': 500,
+                               'max_pulse': 2500, 'center_pulse': 1500,
+                               'frequency_hz': 50, 'travel_degrees': 360})
+        for width in (500, 1500, 2500):
+            self.counter.preview(0, width)
+            self.finish()
+        self.assertEqual(self.board.commands, [(0, 500), (0, 1500), (0, 2500)])
+        self.assertEqual(self.store.data['positions'][0], [None] * 10)
+        self.assertEqual(self.board.pulses, {})
+        self.assertIsNone(self.counter.snapshot()['servo_specs'][1]['model'])
+        self.counter.calibrate(0, [500, 2500] + [None] * 8)
+        self.assertEqual(ConfigStore(self.store.path).data['positions'][0][:2], [500, 2500])
+
+    def test_ft6335m_limits_cannot_be_widened_by_other_channels_range(self):
+        self.counter.configure({'min_pulse': 300, 'max_pulse': 4000})
+        for width in (499, 2501, 4000, True, '1500'):
+            with self.subTest(width=width), self.assertRaisesRegex(ValueError, '500 to 2500.*FT6335M'):
+                self.counter.preview(0, width)
+        original = deepcopy(self.store.data)
+        with self.assertRaisesRegex(ValueError, '500 to 2500'):
+            self.counter.calibrate(0, [2600] + [None] * 9)
+        self.assertEqual(self.store.data, original)
+        self.assertEqual(self.board.commands, [])
+        self.assertFalse(self.board.enabled)
+
+    def test_retained_ft6335m_out_of_range_calibration_blocks_whole_path_before_motion(self):
+        self.calibrate()
+        self.counter.configure({'max_pulse': 3000})
+        data = deepcopy(self.store.data)
+        data['positions'][0][3] = 2900
+        self.store.save(data)  # Simulate old calibration, without clamping or deleting it.
+        restored = ConfigStore(self.store.path)
+        self.assertEqual(restored.data['positions'][0][3], 2900)
+        self.counter.digits[:2] = ['0', '0']
+        self.counter.auto_ready = True
+        for action in (lambda: self.counter.show('50'), self.counter.test_sequence):
+            with self.assertRaisesRegex(ValueError, '500 to 2500.*FT6335M'):
+                action()
+            self.assertEqual(self.board.commands, [])
+            self.assertFalse(self.board.enabled)
+            self.assertEqual(self.counter.requested, '00')
+        # A corrected calibration can be saved without losing other channels.
+        self.counter.calibrate(0, [500 + digit * 200 for digit in range(10)])
+        self.assertEqual(self.store.data['positions'][1], data['positions'][1])
+
+    def test_pulse_range_keeps_the_hardware_envelope_and_saved_pulses(self):
+        for low, high in [(299, 2400), (600, 4001), (1500, 1550), (2000, 1000)]:
+            with self.subTest(low=low, high=high), self.assertRaises(ValueError):
+                self.counter.configure({'min_pulse': low, 'max_pulse': high})
+        self.counter.configure({'max_pulse': 4000})
+        self.board.enable()
+        self.board.write(1, 4000)  # custom channels retain the wider envelope
+        self.counter.configure({'max_pulse': 2400})
+        self.counter.calibrate(1, [2400] + [None] * 9)
+        # Narrowing past a saved pulse is refused and names that pulse.
+        with self.assertRaisesRegex(ValueError, "Servo 1, number 0 is 2400"):
+            self.counter.configure({'max_pulse': 2300})
+        self.assertEqual(self.store.data['max_pulse'], 2400)
+
+    def test_default_pulse_range_leaves_the_saved_file_readable_by_older_releases(self):
+        self.counter.calibrate(0, [1500] * 10)
+        self.assertNotIn('min_pulse', json.loads(self.store.path.read_text()))
+        self.counter.configure({'max_pulse': 2600})
+        saved = json.loads(self.store.path.read_text())
+        self.assertEqual((saved.get('min_pulse'), saved['max_pulse']), (None, 2600))
+        self.assertEqual(ConfigStore(self.store.path).data['min_pulse'], 600)
 
     def test_old_config_preserves_calibration_and_disables_hold_mode(self):
         data = defaults()
@@ -315,15 +620,30 @@ class HardwareTests(unittest.TestCase):
 
     def test_signal_bounds_reject_nan_boolean_and_invalid_channel(self):
         self.board.enable()
-        for width in [599,2401,float('nan'),float('inf'),True,"1500",1500.5]:
+        for width in [299,4001,float('nan'),float('inf'),True,"1500",1500.5]:
             with self.subTest(width=width),self.assertRaises(ValueError): self.board.write(0,width)
         for channel in [-1,16,True]:
             with self.assertRaises(ValueError): self.board.write(channel,1500)
 
+    def test_ft6335m_pwm_uses_documented_limits_and_programmed_clock(self):
+        self.board.enable()
+        for width, expected_count in ((500, 103), (1500, 307), (2500, 512)):
+            self.board.write(0, width)
+            self.assertEqual(self.bus.writes[-1], (0x40, 0x06,
+                                                 [0, 0, expected_count & 255, expected_count >> 8]))
+            actual_us = expected_count * (self.bus.registers[0xFE] + 1) / 25
+            self.assertGreaterEqual(actual_us, 500)
+            self.assertLessEqual(actual_us, 2500)
+            self.assertLess(abs(actual_us - width), 4.89)
+        for width in (499, 2501):
+            with self.assertRaises(ValueError):
+                self.board.write(0, width)
+        self.assertEqual(self.board.frequency, 50)
+
 
 class FakeUpdates:
     def snapshot(self,refresh=False): return {"available":False,"checking":False}
-    def start(self): return "Update started"
+    def start(self,branch=None,*,acknowledge_testing=False): return "Update started"
 
 
 class WebTests(unittest.TestCase):
@@ -343,7 +663,8 @@ class WebTests(unittest.TestCase):
 
     def test_dashboard_and_static_assets_work_offline(self):
         html=self.client.get('/').get_data(as_text=True)
-        self.assertIn('Make numbers move.',html)
+        for page in ['data-page="display"','data-page="calibration"','data-page="system"','id="servo-rows"']:
+            self.assertIn(page,html)
         for path in ['/static/counter.css','/static/counter.js','/static/fonts/inter-latin.woff2']:
             with self.client.get(path) as response:
                 self.assertEqual(response.status_code,200)
@@ -351,12 +672,57 @@ class WebTests(unittest.TestCase):
         self.assertTrue(state['simulated'])
         self.assertFalse(state['armed'])
 
+    def test_wrap_endpoint_saves_each_servo_separately(self):
+        response=self.post('/api/wrap',{'channel':1,'enabled':True})
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertEqual(response.json['config']['wrap'][:3],[False,True,False])
+        self.assertEqual(self.post('/api/wrap',{'channel':1}).status_code,400)
+
+    def test_single_port_api_keeps_duration_temporary_and_calibration_empty(self):
+        payload = {'channel': 1, 'pulse_us': 1500, 'duration_ms': 2000}
+        self.post('/api/stop', {})
+        for invalid in [True, 5001, '2000']:
+            self.assertEqual(self.post('/api/preview', {**payload, 'duration_ms': invalid}).status_code, 400)
+        with patch.object(self.counter.cancel, 'wait', return_value=False):
+            self.assertEqual(self.post('/api/preview', payload).status_code, 200)
+            self.counter.worker.join(timeout=1)
+        state = self.client.get('/api/state').get_json()
+        self.assertEqual(state['config']['settle_ms'], 500)
+        self.assertEqual(state['config']['positions'][1], [None] * 10)
+        self.assertIsNone(state['signals'][0])
+        self.assertEqual(state['signals'][1], {'pulse_us': 1500, 'duration_ms': 2000, 'status': 'released'})
+
+    def test_configuration_test_endpoint_reports_tested_and_skipped_servos(self):
+        self.assertEqual(self.post('/api/test-sequence',{}).status_code,400)  # servos off
+        data=deepcopy(self.counter.store.data)
+        data['positions'][0]=[1000+digit*100 for digit in range(10)]
+        self.counter.store.save(data)
+        self.post('/api/arm',{})
+        response=self.post('/api/test-sequence',{})
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertIn('Testing servo 0',response.json['message'])
+        self.assertIn('Skipped servo 1',response.json['message'])
+        self.counter.stop()
+        self.counter.worker.join(timeout=4)
+
     def test_commands_require_token_and_same_origin(self):
         self.assertEqual(self.client.post('/api/arm',json={}).status_code,403)
         headers={**self.headers,'Origin':'http://unrelated.example'}
         self.assertEqual(self.client.post('/api/arm',json={},headers=headers).status_code,403)
         self.assertEqual(self.post('/api/arm',{}).status_code,200)
         self.assertTrue(self.counter.armed)
+
+    def test_calibration_test_after_estop_requires_no_reset_and_keeps_authentication(self):
+        self.counter.auto_ready = True
+        self.assertEqual(self.post('/api/stop', {}).status_code, 200)
+        self.assertEqual(self.client.post('/api/preview', json={'channel': 1, 'pulse_us': 1500}).status_code, 403)
+        self.assertTrue(self.client.get('/api/state').get_json()['estopped'])
+        with patch.object(self.counter.cancel, 'wait', return_value=False):
+            self.assertEqual(self.post('/api/preview', {'channel': 1, 'pulse_us': 1500}).status_code, 200)
+            self.counter.worker.join(timeout=1)
+        self.assertFalse(self.client.get('/api/state').get_json()['estopped'])
+        self.assertTrue(self.counter.board.enabled)
+        self.assertEqual(self.counter.board.pulses, {})
 
     def test_calibration_setup_and_invalid_payloads(self):
         self.assertEqual(self.post('/api/calibration',{'channel':0,'positions':[1500]*10}).status_code,200)
@@ -373,6 +739,105 @@ class WebTests(unittest.TestCase):
         self.counter.arm()
         self.assertEqual(self.post('/api/updates',{}).status_code,200)
         self.assertFalse(self.counter.armed)
+
+    def test_release_channel_switch_is_validated_and_stops_outputs(self):
+        from counter.updates import Updates
+        helper=Path(self.temp.name)/'update-helper'
+        helper.touch()
+        updater=Updates(Path(self.temp.name))
+        client=create_app(self.counter,updater).test_client()
+        import re
+        html=client.get('/').get_data(as_text=True)
+        headers={'X-Counter-Token':re.search(r'name="counter-token" content="([^"]+)"',html)[1]}
+        with patch('counter.updates.HELPER',helper),patch('counter.updates.subprocess.run',return_value=type('Result',(),{'returncode':0})()) as run:
+            self.assertEqual(client.post('/api/updates',json={'branch':'testing'},headers=headers).status_code,400)
+            self.assertEqual(client.post('/api/updates',json={'branch':'other','acknowledge_testing':True},headers=headers).status_code,400)
+            run.assert_not_called()
+            self.counter.arm()
+            self.assertEqual(client.post('/api/updates',json={'branch':'testing','acknowledge_testing':True},headers=headers).status_code,200)
+            self.assertFalse(self.counter.armed)
+            self.assertEqual(run.call_args.args[0][-1],'testing')
+            self.assertEqual(client.post('/api/updates',json={'branch':'main'},headers=headers).status_code,200)
+            self.assertEqual(run.call_args.args[0][-1],'main')
+
+
+class UpdateProgressWebTests(unittest.TestCase):
+    def test_job_progress_identifies_this_service_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            counter=Counter(ConfigStore(Path(directory)/'config.json'),SimulatedBoard())
+            self.addCleanup(counter.close)
+            client=create_app(counter,FakeUpdates()).test_client()
+            import re
+            token=re.search(r'name="counter-token" content="([^"]+)"',client.get('/').get_data(as_text=True))[1]
+            with patch('counter.updates.UPDATE_LOG',Path(directory)/'update.log'):
+                job=client.get('/api/updates/job').get_json()
+        # The dashboard reloads once a restarted service answers with another instance.
+        self.assertEqual(job['instance'],token[:12])
+        self.assertEqual(job['state'],'idle')
+
+
+class EntryPointTests(unittest.TestCase):
+    def boot(self, *args, fail_enable=False):
+        from counter import __main__ as entry
+        board = RecordingBoard()
+        if fail_enable:
+            board.enable = Mock(side_effect=OSError("Board disconnected"))
+        self.addCleanup(board.close)
+        with tempfile.TemporaryDirectory() as directory, patch('waitress.serve') as serve, patch('signal.signal'), patch('atexit.register'), patch.object(entry, 'SimulatedBoard', return_value=board):
+            path = Path(directory) / 'config.json'
+            store = ConfigStore(path)
+            saved = defaults()
+            saved['positions'][0][0], saved['positions'][1][0] = 1400, 1600
+            store.save(saved)
+            with patch('sys.argv', ['counter', '--simulate', '--config', str(path), *args]):
+                entry.main()
+        return serve.call_args.args[0], board
+
+    def test_startup_ready_does_not_replay_positions_or_move(self):
+        app, board = self.boot()
+        client = app.test_client()
+        state = client.get('/api/state').get_json()
+        self.assertTrue(state['armed'])
+        self.assertTrue(board.enabled)
+        self.assertEqual(state['digits'], [None, None])
+        self.assertEqual(state['config']['positions'][0][0], 1400)
+        self.assertEqual(state['config']['positions'][1][0], 1600)
+        self.assertEqual(board.commands, [])
+        self.assertEqual(board.pulses, {})
+        import re
+        token = re.search(r'name="counter-token" content="([^"]+)"', client.get('/').get_data(as_text=True)).group(1)
+        self.assertEqual(client.post('/api/stop', json={}, headers={'X-Counter-Token': token}).status_code, 200)
+        client.get('/')  # Opening/reloading the dashboard must not undo Stop.
+        self.assertFalse(client.get('/api/state').get_json()['armed'])
+        self.assertFalse(board.enabled)
+
+    def test_explicit_start_stopped_requires_start(self):
+        app, board = self.boot('--start-stopped')
+        self.assertFalse(app.test_client().get('/api/state').get_json()['armed'])
+        self.assertFalse(board.enabled)
+        self.assertEqual(board.commands, [])
+
+    def test_startup_enable_failure_keeps_dashboard_available_and_outputs_off(self):
+        app, board = self.boot(fail_enable=True)
+        state = app.test_client().get('/api/state').get_json()
+        self.assertFalse(state['armed'])
+        self.assertFalse(board.enabled)
+        self.assertIn('Board disconnected', state['error'])
+        self.assertEqual(board.commands, [])
+
+    def serve_with(self,*args):
+        from counter import __main__ as entry
+        with tempfile.TemporaryDirectory() as directory, patch('waitress.serve') as serve, patch('signal.signal'), patch('atexit.register'):
+            with patch('sys.argv',['counter','--simulate','--config',str(Path(directory)/'config.json'),*args]):
+                entry.main()
+        return serve.call_args.kwargs['listen']
+
+    def test_default_port_is_8080(self):
+        self.assertEqual(self.serve_with(),'127.0.0.1:8080')
+
+    def test_repeated_ports_listen_on_each(self):
+        # The Pi service serves port 80 for bare-IP browsing and 8080 for older links.
+        self.assertEqual(self.serve_with('--host','0.0.0.0','--port','80','--port','8080'),'0.0.0.0:80 0.0.0.0:8080')
 
 
 if __name__=='__main__': unittest.main()
