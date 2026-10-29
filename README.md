@@ -110,7 +110,7 @@ This shows every connection for the requested Pi-powered prototype. Physical
 header pin numbers are different from BCM GPIO numbers. The SVG is a connection
 map, not the physical order of pins on a particular breakout board.
 
-![Complete Pi, PCA9685 and servo wiring](core/counter/static/wiring.svg)
+<picture><img src="core/counter/static/wiring.svg" alt="Complete Pi, PCA9685 and servo wiring"></picture>
 
 | Pi physical pin | PCA9685 |
 | --- | --- |
